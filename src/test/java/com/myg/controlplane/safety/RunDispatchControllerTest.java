@@ -55,7 +55,8 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "staging",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 120
+                                  "requestedDurationSeconds": 120,
+                                  "requestedBy": "experiment-operator"
                                 }
                                 """))
                 .andExpect(status().isOk())
@@ -73,7 +74,8 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "prod",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 120
+                                  "requestedDurationSeconds": 120,
+                                  "requestedBy": "experiment-operator"
                                 }
                                 """))
                 .andExpect(status().isUnprocessableEntity())
@@ -106,13 +108,32 @@ class RunDispatchControllerTest {
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
                                   "requestedDurationSeconds": 300,
-                                  "approvalId": "%s"
+                                  "approvalId": "%s",
+                                  "requestedBy": "experiment-operator"
                                 }
                                 """.formatted(approvalId)))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.status").value("AUTHORIZED"))
                 .andExpect(jsonPath("$.approvalId").value(approvalId))
                 .andExpect(jsonPath("$.targetEnvironment").value("prod"));
+
+        mockMvc.perform(get("/audit/events")
+                        .param("action", "approval_created")
+                        .param("resourceType", "approval")
+                        .param("resourceId", approvalId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].actor").value("platform-admin"))
+                .andExpect(jsonPath("$[0].metadata.targetEnvironment").value("prod"));
+
+        mockMvc.perform(get("/audit/events")
+                        .param("action", "run_started")
+                        .param("resourceType", "run")
+                        .param("actor", "experiment-operator"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].metadata.approvalId").value(approvalId))
+                .andExpect(jsonPath("$[0].metadata.targetSelector").value("checkout-service"));
     }
 
     @Test
@@ -124,7 +145,8 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "staging",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 120
+                                  "requestedDurationSeconds": 120,
+                                  "requestedBy": "experiment-operator"
                                 }
                                 """))
                 .andExpect(status().isAccepted())
@@ -155,16 +177,26 @@ class RunDispatchControllerTest {
                 .andExpect(jsonPath("$[0].stopCommandIssuedBy").value("ops-oncall"))
                 .andExpect(jsonPath("$[0].stopCommandReason").value("customer-impact containment"));
 
-        mockMvc.perform(get("/safety/audit-records"))
+        mockMvc.perform(get("/audit/events")
+                        .param("resourceType", "run")
+                        .param("resourceId", runId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
-                .andExpect(jsonPath("$[0].eventType").value("RUN_STOP_REQUESTED"))
-                .andExpect(jsonPath("$[0].runId").value(runId))
-                .andExpect(jsonPath("$[0].operator").value("ops-oncall"))
-                .andExpect(jsonPath("$[0].reason").value("customer-impact containment"))
-                .andExpect(jsonPath("$[1].eventType").value("KILL_SWITCH_ENABLED"))
-                .andExpect(jsonPath("$[1].operator").value("ops-oncall"))
-                .andExpect(jsonPath("$[1].reason").value("customer-impact containment"));
+                .andExpect(jsonPath("$[0].action").value("RUN_STOP_REQUESTED"))
+                .andExpect(jsonPath("$[0].resourceId").value(runId))
+                .andExpect(jsonPath("$[0].actor").value("ops-oncall"))
+                .andExpect(jsonPath("$[0].summary").value("customer-impact containment"))
+                .andExpect(jsonPath("$[1].action").value("RUN_STARTED"))
+                .andExpect(jsonPath("$[1].actor").value("experiment-operator"))
+                .andExpect(jsonPath("$[1].metadata.targetSelector").value("checkout-service"));
+
+        mockMvc.perform(get("/safety/audit-records")
+                        .param("action", "kill_switch_enabled")
+                        .param("resourceType", "kill_switch"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].actor").value("ops-oncall"))
+                .andExpect(jsonPath("$[0].summary").value("customer-impact containment"));
     }
 
     @Test
@@ -186,7 +218,8 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "staging",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 120
+                                  "requestedDurationSeconds": 120,
+                                  "requestedBy": "ops-oncall"
                                 }
                                 """))
                 .andExpect(status().isUnprocessableEntity())
@@ -196,6 +229,16 @@ class RunDispatchControllerTest {
         mockMvc.perform(get("/safety/runs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
+
+        mockMvc.perform(get("/audit/events")
+                        .param("action", "run_start_rejected")
+                        .param("actor", "ops-oncall")
+                        .param("resourceType", "run_dispatch"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].summary").value("Run start rejected by safety guardrails"))
+                .andExpect(jsonPath("$[0].metadata.targetEnvironment").value("staging"))
+                .andExpect(jsonPath("$[0].metadata.violations[0].code").value("KILL_SWITCH_ACTIVE"));
     }
 
     @Test
@@ -207,13 +250,48 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "staging",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 1200
+                                  "requestedDurationSeconds": 1200,
+                                  "requestedBy": "experiment-operator"
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.decision").value("REJECTED"))
                 .andExpect(jsonPath("$.maxDurationSeconds").value(900))
                 .andExpect(jsonPath("$.violations[0].code").value("MAX_DURATION_EXCEEDED"));
+    }
+
+    @Test
+    void disablingKillSwitchWritesAuditMetadata() throws Exception {
+        mockMvc.perform(post("/safety/kill-switch/enable")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "operator": "ops-oncall",
+                                  "reason": "region isolation"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/safety/kill-switch/disable")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "operator": "ops-oncall",
+                                  "reason": "recovered"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(false))
+                .andExpect(jsonPath("$.lastDisabledBy").value("ops-oncall"))
+                .andExpect(jsonPath("$.lastDisableReason").value("recovered"));
+
+        mockMvc.perform(get("/audit/events")
+                        .param("action", "kill_switch_disabled")
+                        .param("resourceType", "kill_switch"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].actor").value("ops-oncall"))
+                .andExpect(jsonPath("$[0].summary").value("recovered"));
     }
 
     @TestConfiguration

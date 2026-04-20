@@ -2,7 +2,9 @@ package com.myg.controlplane.safety;
 
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
@@ -13,15 +15,18 @@ public class SafetyGuardrailsService {
     private final SafetyGuardrailsProperties properties;
     private final DispatchApprovalService dispatchApprovalService;
     private final KillSwitchService killSwitchService;
+    private final AuditLogService auditLogService;
 
     public SafetyGuardrailsService(Clock clock,
                                    SafetyGuardrailsProperties properties,
                                    DispatchApprovalService dispatchApprovalService,
-                                   KillSwitchService killSwitchService) {
+                                   KillSwitchService killSwitchService,
+                                   AuditLogService auditLogService) {
         this.clock = clock;
         this.properties = properties;
         this.dispatchApprovalService = dispatchApprovalService;
         this.killSwitchService = killSwitchService;
+        this.auditLogService = auditLogService;
     }
 
     public DispatchValidationResponse validate(RunDispatchRequest request) {
@@ -31,6 +36,15 @@ public class SafetyGuardrailsService {
     public DispatchAuthorizationResponse authorize(RunDispatchRequest request) {
         DispatchValidationResponse response = validate(request);
         if (response.decision() != DispatchDecision.ALLOWED) {
+            auditLogService.record(
+                    SafetyAuditEventType.RUN_START_REJECTED,
+                    AuditResourceType.RUN_DISPATCH,
+                    UUID.randomUUID().toString(),
+                    request.requestedBy().trim(),
+                    "Run start rejected by safety guardrails",
+                    rejectedDispatchMetadata(request, response),
+                    clock.instant()
+            );
             throw new RunDispatchRejectedException(response);
         }
 
@@ -111,5 +125,25 @@ public class SafetyGuardrailsService {
 
     private boolean requiresApproval(String normalizedEnvironment) {
         return properties.normalizedProductionLikeEnvironments().contains(normalizedEnvironment);
+    }
+
+    private Map<String, Object> rejectedDispatchMetadata(RunDispatchRequest request,
+                                                         DispatchValidationResponse response) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("decision", response.decision().name());
+        metadata.put("targetEnvironment", response.targetEnvironment());
+        metadata.put("targetSelector", request.targetSelector().trim());
+        metadata.put("faultType", request.faultType().trim());
+        metadata.put("requestedDurationSeconds", request.requestedDurationSeconds());
+        if (request.approvalId() != null) {
+            metadata.put("approvalId", request.approvalId().toString());
+        }
+        metadata.put("violations", response.violations().stream()
+                .map(violation -> Map.of(
+                        "code", violation.code().name(),
+                        "message", violation.message()
+                ))
+                .toList());
+        return metadata;
     }
 }

@@ -2,8 +2,9 @@ package com.myg.controlplane.safety;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.UUID;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,16 +16,16 @@ public class KillSwitchService {
     private final Clock clock;
     private final KillSwitchStateJpaRepository killSwitchStateJpaRepository;
     private final ChaosRunJpaRepository chaosRunJpaRepository;
-    private final SafetyAuditRecordJpaRepository safetyAuditRecordJpaRepository;
+    private final AuditLogService auditLogService;
 
     public KillSwitchService(Clock clock,
                              KillSwitchStateJpaRepository killSwitchStateJpaRepository,
                              ChaosRunJpaRepository chaosRunJpaRepository,
-                             SafetyAuditRecordJpaRepository safetyAuditRecordJpaRepository) {
+                             AuditLogService auditLogService) {
         this.clock = clock;
         this.killSwitchStateJpaRepository = killSwitchStateJpaRepository;
         this.chaosRunJpaRepository = chaosRunJpaRepository;
-        this.safetyAuditRecordJpaRepository = safetyAuditRecordJpaRepository;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional(readOnly = true)
@@ -50,23 +51,27 @@ public class KillSwitchService {
         activeRuns.forEach(run -> run.markStopRequested(operator, reason, now));
 
         killSwitchStateJpaRepository.save(stateEntity);
-        safetyAuditRecordJpaRepository.save(new SafetyAuditRecordEntity(
-                UUID.randomUUID(),
+        auditLogService.record(
                 SafetyAuditEventType.KILL_SWITCH_ENABLED,
-                null,
+                AuditResourceType.KILL_SWITCH,
+                "global",
                 operator,
                 reason,
+                Map.of("affectedActiveRunCount", activeRuns.size(), "enabledAt", now),
                 now
-        ));
-        Instant stopRecordedAt = now.plusMillis(1);
-        activeRuns.forEach(run -> safetyAuditRecordJpaRepository.save(new SafetyAuditRecordEntity(
-                UUID.randomUUID(),
-                SafetyAuditEventType.RUN_STOP_REQUESTED,
-                run.toDomain().id(),
-                operator,
-                reason,
-                stopRecordedAt
-        )));
+        );
+        for (int index = 0; index < activeRuns.size(); index++) {
+            ChaosRun run = activeRuns.get(index).toDomain();
+            auditLogService.record(
+                    SafetyAuditEventType.RUN_STOP_REQUESTED,
+                    AuditResourceType.RUN,
+                    run.id().toString(),
+                    operator,
+                    reason,
+                    runStopMetadata(run, now),
+                    now.plusMillis(index + 1L)
+            );
+        }
 
         return statusResponse(stateEntity.toDomain());
     }
@@ -80,24 +85,17 @@ public class KillSwitchService {
         KillSwitchStateEntity stateEntity = loadOrCreate(now);
         stateEntity.disable(operator, reason, now);
         killSwitchStateJpaRepository.save(stateEntity);
-        safetyAuditRecordJpaRepository.save(new SafetyAuditRecordEntity(
-                UUID.randomUUID(),
+        auditLogService.record(
                 SafetyAuditEventType.KILL_SWITCH_DISABLED,
-                null,
+                AuditResourceType.KILL_SWITCH,
+                "global",
                 operator,
                 reason,
+                Map.of("enabled", false, "disabledAt", now),
                 now
-        ));
+        );
 
         return statusResponse(stateEntity.toDomain());
-    }
-
-    @Transactional(readOnly = true)
-    public List<SafetyAuditRecordResponse> listAuditRecords() {
-        return safetyAuditRecordJpaRepository.findAllByOrderByRecordedAtDescIdDesc().stream()
-                .map(SafetyAuditRecordEntity::toDomain)
-                .map(SafetyAuditRecordResponse::from)
-                .toList();
     }
 
     private KillSwitchState currentState() {
@@ -117,5 +115,18 @@ public class KillSwitchService {
                 chaosRunJpaRepository.countByStatus(ChaosRunStatus.ACTIVE),
                 chaosRunJpaRepository.countByStatus(ChaosRunStatus.STOP_REQUESTED)
         );
+    }
+
+    private Map<String, Object> runStopMetadata(ChaosRun run, Instant stopRequestedAt) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("targetEnvironment", run.targetEnvironment());
+        metadata.put("targetSelector", run.targetSelector());
+        metadata.put("faultType", run.faultType());
+        metadata.put("requestedDurationSeconds", run.requestedDurationSeconds());
+        if (run.approvalId() != null) {
+            metadata.put("approvalId", run.approvalId().toString());
+        }
+        metadata.put("stopRequestedAt", stopRequestedAt);
+        return metadata;
     }
 }

@@ -1,10 +1,14 @@
 package com.myg.controlplane.safety;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
@@ -31,6 +35,14 @@ public class SafetyAuditRecordEntity {
     @Column(nullable = false)
     private Instant recordedAt;
 
+    @Enumerated(EnumType.STRING)
+    private AuditResourceType resourceType;
+
+    private String resourceId;
+
+    @Lob
+    private String metadataJson;
+
     protected SafetyAuditRecordEntity() {
     }
 
@@ -39,16 +51,59 @@ public class SafetyAuditRecordEntity {
                                    UUID runId,
                                    String operator,
                                    String reason,
-                                   Instant recordedAt) {
+                                   Instant recordedAt,
+                                   AuditResourceType resourceType,
+                                   String resourceId,
+                                   String metadataJson) {
         this.id = id;
         this.eventType = eventType;
         this.runId = runId;
         this.operator = operator;
         this.reason = reason;
         this.recordedAt = recordedAt;
+        this.resourceType = resourceType;
+        this.resourceId = resourceId;
+        this.metadataJson = metadataJson;
     }
 
-    public SafetyAuditRecord toDomain() {
-        return new SafetyAuditRecord(id, eventType, runId, operator, reason, recordedAt);
+    public SafetyAuditRecord toDomain(ObjectMapper objectMapper) {
+        return new SafetyAuditRecord(
+                id,
+                eventType,
+                resolvedResourceType(),
+                resolvedResourceId(),
+                operator,
+                reason,
+                parseMetadata(objectMapper),
+                recordedAt
+        );
+    }
+
+    private AuditResourceType resolvedResourceType() {
+        if (resourceType != null) {
+            return resourceType;
+        }
+        return runId != null ? AuditResourceType.RUN : AuditResourceType.KILL_SWITCH;
+    }
+
+    private String resolvedResourceId() {
+        if (resourceId != null && !resourceId.isBlank()) {
+            return resourceId;
+        }
+        if (runId != null) {
+            return runId.toString();
+        }
+        return "global";
+    }
+
+    private ObjectNode parseMetadata(ObjectMapper objectMapper) {
+        if (metadataJson == null || metadataJson.isBlank()) {
+            return objectMapper.createObjectNode();
+        }
+        try {
+            return (ObjectNode) objectMapper.readTree(metadataJson);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Failed to deserialize audit metadata", exception);
+        }
     }
 }

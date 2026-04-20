@@ -4,11 +4,16 @@ import com.myg.controlplane.agents.domain.AgentStatus;
 import com.myg.controlplane.agents.domain.RegisteredAgent;
 import com.myg.controlplane.agents.infrastructure.AgentEntity;
 import com.myg.controlplane.agents.infrastructure.AgentJpaRepository;
+import com.myg.controlplane.safety.AuditLogService;
+import com.myg.controlplane.safety.AuditResourceType;
+import com.myg.controlplane.safety.SafetyAuditEventType;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -21,13 +26,16 @@ public class AgentRegistryService {
     private final Clock clock;
     private final AgentRegistryProperties properties;
     private final AgentJpaRepository agentJpaRepository;
+    private final AuditLogService auditLogService;
 
     public AgentRegistryService(Clock clock,
                                 AgentRegistryProperties properties,
-                                AgentJpaRepository agentJpaRepository) {
+                                AgentJpaRepository agentJpaRepository,
+                                AuditLogService auditLogService) {
         this.clock = clock;
         this.properties = properties;
         this.agentJpaRepository = agentJpaRepository;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
@@ -47,7 +55,17 @@ public class AgentRegistryService {
                 now,
                 now
         );
-        return snapshot(agentJpaRepository.save(agent).toDomain(), now);
+        RegisteredAgent savedAgent = agentJpaRepository.save(agent).toDomain();
+        auditLogService.record(
+                SafetyAuditEventType.AGENT_REGISTERED,
+                AuditResourceType.AGENT,
+                savedAgent.id().toString(),
+                savedAgent.name(),
+                "Registered agent on host " + savedAgent.hostname(),
+                registrationMetadata(savedAgent),
+                now
+        );
+        return snapshot(savedAgent, now);
     }
 
     @Transactional
@@ -117,6 +135,16 @@ public class AgentRegistryService {
 
     private String normalizeCapability(String capability) {
         return capability.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private Map<String, Object> registrationMetadata(RegisteredAgent agent) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("hostname", agent.hostname());
+        metadata.put("environment", agent.environment());
+        metadata.put("region", agent.region());
+        metadata.put("supportedFaultCapabilities", agent.supportedFaultCapabilities().stream().sorted().toList());
+        metadata.put("registeredAt", agent.registeredAt());
+        return metadata;
     }
 
     public record AgentSnapshot(

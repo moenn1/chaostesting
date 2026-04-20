@@ -68,6 +68,19 @@ class AgentControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(agentId))
                 .andExpect(jsonPath("$.status").value("HEALTHY"));
+
+        mockMvc.perform(get("/audit/events")
+                        .param("action", "agent_registered")
+                        .param("resourceType", "agent")
+                        .param("actor", "agent-eu-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].resourceId").value(agentId))
+                .andExpect(jsonPath("$[0].summary").value("Registered agent on host node-a.internal"))
+                .andExpect(jsonPath("$[0].metadata.environment").value("staging"))
+                .andExpect(jsonPath("$[0].metadata.region").value("eu-west-1"))
+                .andExpect(jsonPath("$[0].metadata.supportedFaultCapabilities[0]").value("http_error"))
+                .andExpect(jsonPath("$[0].metadata.supportedFaultCapabilities[1]").value("latency"));
     }
 
     @Test

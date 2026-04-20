@@ -71,11 +71,6 @@ public class RunDispatchController {
         return killSwitchService.disable(request);
     }
 
-    @GetMapping("/audit-records")
-    public List<SafetyAuditRecordResponse> listAuditRecords() {
-        return killSwitchService.listAuditRecords();
-    }
-
     @ExceptionHandler(RunDispatchRejectedException.class)
     @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
     public DispatchValidationResponse handleRejected(RunDispatchRejectedException exception) {

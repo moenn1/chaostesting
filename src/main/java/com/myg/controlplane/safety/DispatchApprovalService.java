@@ -2,6 +2,8 @@ package com.myg.controlplane.safety;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,13 +14,16 @@ public class DispatchApprovalService {
     private final Clock clock;
     private final SafetyGuardrailsProperties properties;
     private final DispatchApprovalJpaRepository repository;
+    private final AuditLogService auditLogService;
 
     public DispatchApprovalService(Clock clock,
                                    SafetyGuardrailsProperties properties,
-                                   DispatchApprovalJpaRepository repository) {
+                                   DispatchApprovalJpaRepository repository,
+                                   AuditLogService auditLogService) {
         this.clock = clock;
         this.properties = properties;
         this.repository = repository;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
@@ -32,7 +37,17 @@ public class DispatchApprovalService {
                 now,
                 now.plus(properties.getApprovalTtl())
         );
-        return repository.save(entity).toDomain();
+        DispatchApproval approval = repository.save(entity).toDomain();
+        auditLogService.record(
+                SafetyAuditEventType.APPROVAL_CREATED,
+                AuditResourceType.APPROVAL,
+                approval.id().toString(),
+                approval.approvedBy(),
+                approval.reason(),
+                approvalMetadata(approval),
+                approval.approvedAt()
+        );
+        return approval;
     }
 
     @Transactional(readOnly = true)
@@ -48,5 +63,13 @@ public class DispatchApprovalService {
                 .filter(approval -> approval.targetEnvironment().equals(normalizedEnvironment))
                 .filter(approval -> !now.isAfter(approval.expiresAt()))
                 .isPresent();
+    }
+
+    private Map<String, Object> approvalMetadata(DispatchApproval approval) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("targetEnvironment", approval.targetEnvironment());
+        metadata.put("approvedAt", approval.approvedAt());
+        metadata.put("expiresAt", approval.expiresAt());
+        return metadata;
     }
 }

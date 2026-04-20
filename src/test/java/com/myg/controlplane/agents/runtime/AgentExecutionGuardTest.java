@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
+import com.myg.controlplane.safety.AuditLogService;
 import com.myg.controlplane.safety.DispatchApprovalService;
 import com.myg.controlplane.safety.EnvironmentPolicyMode;
 import com.myg.controlplane.safety.KillSwitchService;
@@ -23,6 +24,7 @@ class AgentExecutionGuardTest {
 
     private final DispatchApprovalService dispatchApprovalService = Mockito.mock(DispatchApprovalService.class);
     private final KillSwitchService killSwitchService = Mockito.mock(KillSwitchService.class);
+    private final AuditLogService auditLogService = Mockito.mock(AuditLogService.class);
 
     private AgentExecutionGuard agentExecutionGuard;
 
@@ -37,7 +39,8 @@ class AgentExecutionGuardTest {
                 Clock.fixed(Instant.parse("2026-04-20T16:00:00Z"), ZoneOffset.UTC),
                 properties,
                 dispatchApprovalService,
-                killSwitchService
+                killSwitchService,
+                auditLogService
         );
         when(killSwitchService.isEnabled()).thenReturn(false);
         agentExecutionGuard = new AgentExecutionGuard(safetyGuardrailsService);

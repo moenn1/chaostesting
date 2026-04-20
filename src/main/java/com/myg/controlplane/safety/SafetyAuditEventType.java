@@ -1,6 +1,10 @@
 package com.myg.controlplane.safety;
 
 public enum SafetyAuditEventType {
+    AGENT_REGISTERED,
+    APPROVAL_CREATED,
+    RUN_STARTED,
+    RUN_START_REJECTED,
     KILL_SWITCH_ENABLED,
     KILL_SWITCH_DISABLED,
     RUN_STOP_REQUESTED

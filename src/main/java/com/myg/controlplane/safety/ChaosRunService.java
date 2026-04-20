@@ -1,6 +1,8 @@
 package com.myg.controlplane.safety;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -10,11 +12,14 @@ public class ChaosRunService {
 
     private final ChaosRunJpaRepository chaosRunJpaRepository;
     private final SafetyGuardrailsService safetyGuardrailsService;
+    private final AuditLogService auditLogService;
 
     public ChaosRunService(ChaosRunJpaRepository chaosRunJpaRepository,
-                           SafetyGuardrailsService safetyGuardrailsService) {
+                           SafetyGuardrailsService safetyGuardrailsService,
+                           AuditLogService auditLogService) {
         this.chaosRunJpaRepository = chaosRunJpaRepository;
         this.safetyGuardrailsService = safetyGuardrailsService;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
@@ -34,6 +39,15 @@ public class ChaosRunService {
                 null
         );
         chaosRunJpaRepository.save(entity);
+        auditLogService.record(
+                SafetyAuditEventType.RUN_STARTED,
+                AuditResourceType.RUN,
+                authorization.dispatchId().toString(),
+                request.requestedBy().trim(),
+                "Authorized chaos run for " + authorization.targetSelector(),
+                runMetadata(authorization),
+                authorization.authorizedAt()
+        );
         return authorization;
     }
 
@@ -46,5 +60,18 @@ public class ChaosRunService {
                 .map(ChaosRunEntity::toDomain)
                 .map(ChaosRunResponse::from)
                 .toList();
+    }
+
+    private Map<String, Object> runMetadata(DispatchAuthorizationResponse authorization) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("targetEnvironment", authorization.targetEnvironment());
+        metadata.put("targetSelector", authorization.targetSelector());
+        metadata.put("faultType", authorization.faultType());
+        metadata.put("requestedDurationSeconds", authorization.requestedDurationSeconds());
+        if (authorization.approvalId() != null) {
+            metadata.put("approvalId", authorization.approvalId().toString());
+        }
+        metadata.put("authorizedAt", authorization.authorizedAt());
+        return metadata;
     }
 }
