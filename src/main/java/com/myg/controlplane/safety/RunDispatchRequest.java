@@ -15,8 +15,12 @@ public record RunDispatchRequest(
         @NotBlank String faultType,
         @Positive long requestedDurationSeconds,
         @PositiveOrZero Integer latencyMilliseconds,
+        @PositiveOrZero Integer latencyJitterMilliseconds,
+        @PositiveOrZero Integer latencyMinimumMilliseconds,
+        @PositiveOrZero Integer latencyMaximumMilliseconds,
         Integer errorCode,
         @PositiveOrZero @Max(100) Integer trafficPercentage,
+        @PositiveOrZero @Max(100) Integer dropPercentage,
         List<@NotBlank String> routeFilters,
         UUID approvalId,
         @NotBlank String requestedBy

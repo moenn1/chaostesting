@@ -60,7 +60,11 @@ class AgentExecutionGuardTest {
                 60 * 20L,
                 250,
                 null,
+                null,
+                null,
+                null,
                 30,
+                null,
                 List.of(),
                 null
         );
@@ -78,7 +82,11 @@ class AgentExecutionGuardTest {
                 "http_error",
                 300,
                 null,
+                null,
+                null,
+                null,
                 503,
+                null,
                 null,
                 List.of("/checkout"),
                 null
@@ -96,13 +104,40 @@ class AgentExecutionGuardTest {
                 UUID.randomUUID(),
                 "prod",
                 "checkout",
-                "http_error",
+                "latency",
                 300,
+                250,
+                25,
                 null,
-                503,
-                20,
-                List.of("/checkout"),
+                null,
+                null,
+                30,
+                null,
+                List.of(),
                 approvalId
+        );
+
+        assertThatCode(() -> agentExecutionGuard.verify(executionPlan))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void allowsRequestDropExecutionPlansWithinSafetyLimits() {
+        AgentExecutionPlan executionPlan = new AgentExecutionPlan(
+                UUID.randomUUID(),
+                "staging",
+                "checkout",
+                "request_drop",
+                180,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                10,
+                List.of(),
+                null
         );
 
         assertThatCode(() -> agentExecutionGuard.verify(executionPlan))

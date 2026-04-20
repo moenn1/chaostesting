@@ -93,8 +93,12 @@ class ChaosRunServiceTest {
                 "latency",
                 120,
                 350,
+                40,
+                null,
+                null,
                 null,
                 30,
+                null,
                 List.of(),
                 null,
                 clock.instant()
@@ -105,8 +109,12 @@ class ChaosRunServiceTest {
                 "latency",
                 120,
                 350,
+                40,
+                null,
+                null,
                 null,
                 30,
+                null,
                 List.of(),
                 null,
                 "experiment-operator"
@@ -160,8 +168,12 @@ class ChaosRunServiceTest {
                 "http_error",
                 120,
                 null,
+                null,
+                null,
+                null,
                 503,
                 30,
+                null,
                 List.of("/checkout"),
                 null,
                 clock.instant()
@@ -172,8 +184,12 @@ class ChaosRunServiceTest {
                 "http_error",
                 120,
                 null,
+                null,
+                null,
+                null,
                 503,
                 30,
+                null,
                 List.of("/checkout"),
                 null,
                 "experiment-operator"
@@ -197,6 +213,59 @@ class ChaosRunServiceTest {
         assertThat(response.state()).isEqualTo(RunExecutionReportState.FAILURE);
         assertThat(response.reportedBy()).isEqualTo("agent-eu-1");
         verify(runExecutionReportJpaRepository).save(any(RunExecutionReportEntity.class));
+    }
+
+    @Test
+    void requestDropRunPersistsFaultShapeAcrossTelemetryAndRollback() {
+        UUID runId = UUID.randomUUID();
+        DispatchAuthorizationResponse authorization = new DispatchAuthorizationResponse(
+                runId,
+                "AUTHORIZED",
+                "staging",
+                "edge-gateway",
+                "request_drop",
+                90,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                12,
+                List.of(),
+                null,
+                clock.instant()
+        );
+        RunDispatchRequest request = new RunDispatchRequest(
+                "staging",
+                "edge-gateway",
+                "request_drop",
+                90,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                12,
+                List.of(),
+                null,
+                "experiment-operator"
+        );
+
+        chaosRunService.startAuthorizedRun(authorization, request);
+        ChaosRunResponse stopped = chaosRunService.stopRun(runId, "ops-oncall", "containment");
+
+        assertThat(stopped.faultType()).isEqualTo("request_drop");
+        assertThat(stopped.dropPercentage()).isEqualTo(12);
+
+        ArgumentCaptor<LatencyTelemetrySnapshotEntity> telemetryCaptor =
+                ArgumentCaptor.forClass(LatencyTelemetrySnapshotEntity.class);
+        verify(latencyTelemetrySnapshotJpaRepository, Mockito.times(2)).save(telemetryCaptor.capture());
+        assertThat(telemetryCaptor.getAllValues())
+                .extracting(LatencyTelemetrySnapshotEntity::toDomain)
+                .extracting(LatencyTelemetrySnapshot::faultType)
+                .containsExactly("request_drop", "request_drop");
     }
 
     private static final class MutableClock extends Clock {

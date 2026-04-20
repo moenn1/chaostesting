@@ -66,8 +66,12 @@ public class ExperimentRunService {
                 faultType,
                 experiment.faultConfig().durationSeconds(),
                 "latency".equals(faultType) ? integerParameter(experiment.faultConfig().parameters(), "latencyMs") : null,
+                "latency".equals(faultType) ? integerParameter(experiment.faultConfig().parameters(), "jitterMs") : null,
+                "latency".equals(faultType) ? integerParameter(experiment.faultConfig().parameters(), "minLatencyMs") : null,
+                "latency".equals(faultType) ? integerParameter(experiment.faultConfig().parameters(), "maxLatencyMs") : null,
                 "http_error".equals(faultType) ? integerParameter(experiment.faultConfig().parameters(), "statusCode") : null,
                 integerParameter(experiment.faultConfig().parameters(), "percentage"),
+                "request_drop".equals(faultType) ? integerParameter(experiment.faultConfig().parameters(), "percentage") : null,
                 List.of(),
                 approvalId,
                 requestedBy.trim()

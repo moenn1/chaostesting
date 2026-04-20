@@ -11,8 +11,12 @@ public record AgentExecutionPlan(
         String faultType,
         long requestedDurationSeconds,
         Integer latencyMilliseconds,
+        Integer latencyJitterMilliseconds,
+        Integer latencyMinimumMilliseconds,
+        Integer latencyMaximumMilliseconds,
         Integer errorCode,
         Integer trafficPercentage,
+        Integer dropPercentage,
         List<String> routeFilters,
         UUID approvalId
 ) {
@@ -27,8 +31,12 @@ public record AgentExecutionPlan(
                 faultType,
                 requestedDurationSeconds,
                 latencyMilliseconds,
+                latencyJitterMilliseconds,
+                latencyMinimumMilliseconds,
+                latencyMaximumMilliseconds,
                 errorCode,
                 trafficPercentage,
+                dropPercentage,
                 routeFilters,
                 approvalId,
                 "agent-runtime"

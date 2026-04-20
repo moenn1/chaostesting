@@ -44,6 +44,15 @@ class CoreSchemaMigrationTest {
             assertThat(tableExists(connection, "audit_events")).isTrue();
 
             assertThat(columnExists(connection, "chaos_runs", "error_code")).isTrue();
+            assertThat(columnExists(connection, "chaos_runs", "latency_jitter_milliseconds")).isTrue();
+            assertThat(columnExists(connection, "chaos_runs", "latency_minimum_milliseconds")).isTrue();
+            assertThat(columnExists(connection, "chaos_runs", "latency_maximum_milliseconds")).isTrue();
+            assertThat(columnExists(connection, "chaos_runs", "drop_percentage")).isTrue();
+            assertThat(columnExists(connection, "latency_telemetry_snapshots", "fault_type")).isTrue();
+            assertThat(columnExists(connection, "latency_telemetry_snapshots", "latency_jitter_milliseconds")).isTrue();
+            assertThat(columnExists(connection, "latency_telemetry_snapshots", "latency_minimum_milliseconds")).isTrue();
+            assertThat(columnExists(connection, "latency_telemetry_snapshots", "latency_maximum_milliseconds")).isTrue();
+            assertThat(columnExists(connection, "latency_telemetry_snapshots", "drop_percentage")).isTrue();
 
             assertThat(importedKeys(connection, "agent_commands"))
                     .contains("agents");

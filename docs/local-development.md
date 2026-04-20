@@ -190,6 +190,48 @@ curl -s \
 
 The authenticated operator routes are covered in [Security and RBAC](security-auth.md). The runnable end-to-end API flows are in [Example walkthroughs](example-walkthroughs.md).
 
+### Traffic-shaping dispatch smoke check
+
+Validate a jitter-based latency run:
+
+```bash
+curl -s \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/safety/dispatches/validate \
+  -d '{
+    "targetEnvironment": "staging",
+    "targetSelector": "checkout-service",
+    "faultType": "latency",
+    "requestedDurationSeconds": 120,
+    "latencyMilliseconds": 350,
+    "latencyJitterMilliseconds": 40,
+    "trafficPercentage": 30,
+    "requestedBy": "operator-demo"
+  }'
+```
+
+Dispatch a request-drop run and inspect its telemetry:
+
+```bash
+curl -s \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/safety/dispatches \
+  -d '{
+    "targetEnvironment": "staging",
+    "targetSelector": "edge-gateway",
+    "faultType": "request_drop",
+    "requestedDurationSeconds": 180,
+    "dropPercentage": 12,
+    "requestedBy": "operator-demo"
+  }'
+```
+
+The returned `dispatchId` can be queried through `/safety/runs/{runId}` and `/safety/runs/{runId}/telemetry`. Random latency envelopes can also be expressed with `latencyMinimumMilliseconds` and `latencyMaximumMilliseconds` instead of `latencyJitterMilliseconds`.
+
 ## Demo and evaluation flow
 
 Use these assets when you want a fast product tour instead of a full local drill:

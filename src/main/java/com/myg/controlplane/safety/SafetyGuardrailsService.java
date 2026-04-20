@@ -63,8 +63,12 @@ public class SafetyGuardrailsService {
                 response.faultType(),
                 request.requestedDurationSeconds(),
                 request.latencyMilliseconds(),
+                request.latencyJitterMilliseconds(),
+                request.latencyMinimumMilliseconds(),
+                request.latencyMaximumMilliseconds(),
                 request.errorCode(),
                 request.trafficPercentage(),
+                request.dropPercentage(),
                 request.routeFilters(),
                 request.approvalId(),
                 clock.instant()
@@ -101,6 +105,7 @@ public class SafetyGuardrailsService {
         switch (request.normalizedFaultType()) {
             case "latency" -> evaluateLatencyConfiguration(request, violations);
             case "http_error" -> validateHttpErrorConfig(request, violations);
+            case "request_drop" -> evaluateRequestDropConfiguration(request, violations);
             default -> {
             }
         }
@@ -125,20 +130,112 @@ public class SafetyGuardrailsService {
     }
 
     private void evaluateLatencyConfiguration(RunDispatchRequest request, List<GuardrailViolation> violations) {
+        boolean usesFixedLatency = request.latencyMilliseconds() != null;
+        boolean usesBoundedLatency = request.latencyMinimumMilliseconds() != null
+                || request.latencyMaximumMilliseconds() != null;
+
+        if (usesFixedLatency && usesBoundedLatency) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.LATENCY_CONFIGURATION_CONFLICT,
+                    "Latency faults must use either latencyMilliseconds with optional latencyJitterMilliseconds or latencyMinimumMilliseconds/latencyMaximumMilliseconds bounds."
+            ));
+        }
+
+        if (!usesFixedLatency && !usesBoundedLatency) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.LATENCY_AMOUNT_REQUIRED,
+                    "Latency faults require latencyMilliseconds or latencyMinimumMilliseconds/latencyMaximumMilliseconds bounds."
+            ));
+        }
+
+        if (usesFixedLatency) {
+            evaluateFixedLatency(request, violations);
+        }
+        if (usesBoundedLatency) {
+            evaluateLatencyBounds(request, violations);
+        }
+
+        validateTrafficPercentage(
+                request.trafficPercentage(),
+                violations,
+                "Latency faults require a trafficPercentage between 1 and 100."
+        );
+    }
+
+    private void evaluateFixedLatency(RunDispatchRequest request, List<GuardrailViolation> violations) {
         if (request.latencyMilliseconds() == null || request.latencyMilliseconds() <= 0) {
             violations.add(new GuardrailViolation(
                     GuardrailViolationCode.LATENCY_AMOUNT_REQUIRED,
                     "Latency faults require a positive latencyMilliseconds value."
             ));
-        } else if (request.latencyMilliseconds() > latencyInjectionProperties.getMaxLatency().toMillis()) {
+            return;
+        }
+
+        long maxLatencyMillis = latencyInjectionProperties.getMaxLatency().toMillis();
+        if (request.latencyMilliseconds() > maxLatencyMillis) {
             violations.add(new GuardrailViolation(
                     GuardrailViolationCode.LATENCY_AMOUNT_EXCEEDED,
                     "Latency amount %sms exceeds the configured max of %sms."
-                            .formatted(request.latencyMilliseconds(), latencyInjectionProperties.getMaxLatency().toMillis())
+                            .formatted(request.latencyMilliseconds(), maxLatencyMillis)
             ));
         }
 
-        validateTrafficPercentage(request.trafficPercentage(), violations);
+        if (request.latencyJitterMilliseconds() == null) {
+            return;
+        }
+        if (request.latencyJitterMilliseconds() > request.latencyMilliseconds()) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.LATENCY_JITTER_INVALID,
+                    "latencyJitterMilliseconds %sms cannot exceed latencyMilliseconds %sms."
+                            .formatted(request.latencyJitterMilliseconds(), request.latencyMilliseconds())
+            ));
+        }
+        if ((long) request.latencyMilliseconds() + request.latencyJitterMilliseconds() > maxLatencyMillis) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.LATENCY_JITTER_EXCEEDED,
+                    "Latency jitter expands the upper bound to %sms, which exceeds the configured max of %sms."
+                            .formatted(request.latencyMilliseconds() + request.latencyJitterMilliseconds(), maxLatencyMillis)
+            ));
+        }
+    }
+
+    private void evaluateLatencyBounds(RunDispatchRequest request, List<GuardrailViolation> violations) {
+        if (request.latencyMinimumMilliseconds() == null || request.latencyMaximumMilliseconds() == null) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.LATENCY_BOUNDS_REQUIRED,
+                    "Latency bounds require both latencyMinimumMilliseconds and latencyMaximumMilliseconds."
+            ));
+            return;
+        }
+
+        if (request.latencyMinimumMilliseconds() <= 0 || request.latencyMaximumMilliseconds() <= 0) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.LATENCY_BOUNDS_INVALID,
+                    "Latency bounds must be greater than zero."
+            ));
+            return;
+        }
+
+        if (request.latencyMinimumMilliseconds() > request.latencyMaximumMilliseconds()) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.LATENCY_BOUNDS_INVALID,
+                    "latencyMinimumMilliseconds %sms cannot exceed latencyMaximumMilliseconds %sms."
+                            .formatted(request.latencyMinimumMilliseconds(), request.latencyMaximumMilliseconds())
+            ));
+        }
+        if (request.latencyMaximumMilliseconds() > latencyInjectionProperties.getMaxLatency().toMillis()) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.LATENCY_AMOUNT_EXCEEDED,
+                    "Latency bound %sms exceeds the configured max of %sms."
+                            .formatted(request.latencyMaximumMilliseconds(), latencyInjectionProperties.getMaxLatency().toMillis())
+            ));
+        }
+        if (request.latencyJitterMilliseconds() != null) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.LATENCY_CONFIGURATION_CONFLICT,
+                    "latencyJitterMilliseconds cannot be combined with latencyMinimumMilliseconds/latencyMaximumMilliseconds bounds."
+            ));
+        }
     }
 
     private void validateHttpErrorConfig(RunDispatchRequest request, List<GuardrailViolation> violations) {
@@ -154,14 +251,35 @@ public class SafetyGuardrailsService {
             ));
         }
 
-        validateTrafficPercentage(request.trafficPercentage(), violations);
+        validateTrafficPercentage(
+                request.trafficPercentage(),
+                violations,
+                "Fault dispatches require a trafficPercentage between 1 and 100."
+        );
     }
 
-    private void validateTrafficPercentage(Integer trafficPercentage, List<GuardrailViolation> violations) {
+    private void evaluateRequestDropConfiguration(RunDispatchRequest request, List<GuardrailViolation> violations) {
+        if (request.dropPercentage() == null || request.dropPercentage() <= 0) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.DROP_PERCENTAGE_REQUIRED,
+                    "Request-drop faults require a dropPercentage between 1 and 100."
+            ));
+        } else if (request.dropPercentage() > 100) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.DROP_PERCENTAGE_INVALID,
+                    "Drop percentage %s is outside the supported 1-100 range."
+                            .formatted(request.dropPercentage())
+            ));
+        }
+    }
+
+    private void validateTrafficPercentage(Integer trafficPercentage,
+                                           List<GuardrailViolation> violations,
+                                           String missingMessage) {
         if (trafficPercentage == null || trafficPercentage <= 0) {
             violations.add(new GuardrailViolation(
                     GuardrailViolationCode.TRAFFIC_PERCENTAGE_REQUIRED,
-                    "Fault dispatches require a trafficPercentage between 1 and 100."
+                    missingMessage
             ));
         } else if (trafficPercentage > 100) {
             violations.add(new GuardrailViolation(
@@ -204,11 +322,23 @@ public class SafetyGuardrailsService {
         if (request.latencyMilliseconds() != null) {
             metadata.put("latencyMilliseconds", request.latencyMilliseconds());
         }
+        if (request.latencyJitterMilliseconds() != null) {
+            metadata.put("latencyJitterMilliseconds", request.latencyJitterMilliseconds());
+        }
+        if (request.latencyMinimumMilliseconds() != null) {
+            metadata.put("latencyMinimumMilliseconds", request.latencyMinimumMilliseconds());
+        }
+        if (request.latencyMaximumMilliseconds() != null) {
+            metadata.put("latencyMaximumMilliseconds", request.latencyMaximumMilliseconds());
+        }
         if (request.errorCode() != null) {
             metadata.put("errorCode", request.errorCode());
         }
         if (request.trafficPercentage() != null) {
             metadata.put("trafficPercentage", request.trafficPercentage());
+        }
+        if (request.dropPercentage() != null) {
+            metadata.put("dropPercentage", request.dropPercentage());
         }
         if (!request.routeFilters().isEmpty()) {
             metadata.put("routeFilters", request.routeFilters());

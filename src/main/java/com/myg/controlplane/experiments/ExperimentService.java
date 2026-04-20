@@ -19,10 +19,17 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ExperimentService {
 
-    private static final Set<String> LATENCY_PARAMETERS = Set.of("latencyMs", "percentage", "jitterMs");
+    private static final Set<String> LATENCY_PARAMETERS = Set.of(
+            "latencyMs",
+            "percentage",
+            "jitterMs",
+            "minLatencyMs",
+            "maxLatencyMs"
+    );
     private static final Set<String> CPU_PARAMETERS = Set.of("cpuLoadPercent");
     private static final Set<String> PACKET_LOSS_PARAMETERS = Set.of("lossPercent", "correlationPercent");
     private static final Set<String> HTTP_ERROR_PARAMETERS = Set.of("statusCode", "percentage");
+    private static final Set<String> REQUEST_DROP_PARAMETERS = Set.of("percentage");
     private static final Set<String> CONSUMER_PAUSE_PARAMETERS = Set.of("pauseSeconds");
     private static final Set<String> CONNECTION_CHURN_PARAMETERS = Set.of("connectionsPerSecond");
 
@@ -185,9 +192,8 @@ public class ExperimentService {
         switch (type.toLowerCase(Locale.ROOT)) {
             case "latency" -> {
                 rejectUnknownParameters(type, parameters, LATENCY_PARAMETERS, errors);
-                requireDecimalRange(parameters, "latencyMs", type, BigDecimal.ONE, new BigDecimal("30000"), errors);
                 requireDecimalRange(parameters, "percentage", type, BigDecimal.ONE, new BigDecimal("100"), errors);
-                requireDecimalRange(parameters, "jitterMs", type, BigDecimal.ZERO, new BigDecimal("5000"), errors, false);
+                validateLatencyParameters(parameters, type, errors);
             }
             case "cpu" -> {
                 rejectUnknownParameters(type, parameters, CPU_PARAMETERS, errors);
@@ -204,6 +210,10 @@ public class ExperimentService {
                 requireWholeNumberRange(parameters, "statusCode", type, 400, 599, errors);
                 requireDecimalRange(parameters, "percentage", type, BigDecimal.ONE, new BigDecimal("100"), errors);
             }
+            case "request_drop" -> {
+                rejectUnknownParameters(type, parameters, REQUEST_DROP_PARAMETERS, errors);
+                requireDecimalRange(parameters, "percentage", type, BigDecimal.ONE, new BigDecimal("100"), errors);
+            }
             case "consumer_pause" -> {
                 rejectUnknownParameters(type, parameters, CONSUMER_PAUSE_PARAMETERS, errors);
                 requireWholeNumberRange(parameters, "pauseSeconds", type, 1, 3600, errors);
@@ -214,9 +224,77 @@ public class ExperimentService {
             }
             default -> errors.add(new ExperimentFieldError(
                     "faultConfig.type",
-                    "Unsupported fault type '%s'. Supported values: latency, cpu, packet_loss, http_error, consumer_pause, connection_churn."
+                    "Unsupported fault type '%s'. Supported values: latency, cpu, packet_loss, http_error, request_drop, consumer_pause, connection_churn."
                             .formatted(type)
             ));
+        }
+    }
+
+    private void validateLatencyParameters(Map<String, BigDecimal> parameters,
+                                           String type,
+                                           List<ExperimentFieldError> errors) {
+        BigDecimal latency = parameters.get("latencyMs");
+        BigDecimal jitter = parameters.get("jitterMs");
+        BigDecimal minimum = parameters.get("minLatencyMs");
+        BigDecimal maximum = parameters.get("maxLatencyMs");
+        boolean usesFixedLatency = latency != null;
+        boolean usesBounds = minimum != null || maximum != null;
+
+        if (!usesFixedLatency && !usesBounds) {
+            errors.add(new ExperimentFieldError(
+                    "faultConfig.parameters.latencyMs",
+                    "Provide latencyMs or both minLatencyMs and maxLatencyMs for fault type '%s'."
+                            .formatted(type)
+            ));
+            return;
+        }
+
+        if (usesFixedLatency && usesBounds) {
+            errors.add(new ExperimentFieldError(
+                    "faultConfig.parameters",
+                    "Use either latencyMs with optional jitterMs or minLatencyMs/maxLatencyMs bounds for fault type '%s', not both."
+                            .formatted(type)
+            ));
+        }
+
+        if (usesFixedLatency) {
+            requireDecimalRange(parameters, "latencyMs", type, BigDecimal.ONE, new BigDecimal("30000"), errors);
+            requireDecimalRange(parameters, "jitterMs", type, BigDecimal.ZERO, new BigDecimal("5000"), errors, false);
+            if (latency != null && jitter != null) {
+                if (jitter.compareTo(latency) > 0) {
+                    errors.add(new ExperimentFieldError(
+                            "faultConfig.parameters.jitterMs",
+                            "Parameter 'jitterMs' for fault type '%s' cannot exceed latencyMs."
+                                    .formatted(type)
+                    ));
+                }
+                if (latency.add(jitter).compareTo(new BigDecimal("30000")) > 0) {
+                    errors.add(new ExperimentFieldError(
+                            "faultConfig.parameters.jitterMs",
+                            "latencyMs plus jitterMs for fault type '%s' must stay within 30000."
+                                    .formatted(type)
+                    ));
+                }
+            }
+        }
+
+        if (usesBounds) {
+            requireDecimalRange(parameters, "minLatencyMs", type, BigDecimal.ONE, new BigDecimal("30000"), errors);
+            requireDecimalRange(parameters, "maxLatencyMs", type, BigDecimal.ONE, new BigDecimal("30000"), errors);
+            if (minimum != null && maximum != null && minimum.compareTo(maximum) > 0) {
+                errors.add(new ExperimentFieldError(
+                        "faultConfig.parameters.minLatencyMs",
+                        "Parameter 'minLatencyMs' for fault type '%s' cannot exceed maxLatencyMs."
+                                .formatted(type)
+                ));
+            }
+            if (jitter != null) {
+                errors.add(new ExperimentFieldError(
+                        "faultConfig.parameters.jitterMs",
+                        "Parameter 'jitterMs' cannot be combined with minLatencyMs/maxLatencyMs for fault type '%s'."
+                                .formatted(type)
+                ));
+            }
         }
     }
 

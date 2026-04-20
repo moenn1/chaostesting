@@ -41,9 +41,17 @@ public class ChaosRunEntity {
 
     private Integer latencyMilliseconds;
 
+    private Integer latencyJitterMilliseconds;
+
+    private Integer latencyMinimumMilliseconds;
+
+    private Integer latencyMaximumMilliseconds;
+
     private Integer errorCode;
 
     private Integer trafficPercentage;
+
+    private Integer dropPercentage;
 
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "chaos_run_route_filters", joinColumns = @JoinColumn(name = "run_id"))
@@ -90,8 +98,12 @@ public class ChaosRunEntity {
                           String faultType,
                           long requestedDurationSeconds,
                           Integer latencyMilliseconds,
+                          Integer latencyJitterMilliseconds,
+                          Integer latencyMinimumMilliseconds,
+                          Integer latencyMaximumMilliseconds,
                           Integer errorCode,
                           Integer trafficPercentage,
+                          Integer dropPercentage,
                           List<String> routeFilters,
                           UUID approvalId,
                           ChaosRunStatus status,
@@ -111,8 +123,12 @@ public class ChaosRunEntity {
         this.faultType = faultType;
         this.requestedDurationSeconds = requestedDurationSeconds;
         this.latencyMilliseconds = latencyMilliseconds;
+        this.latencyJitterMilliseconds = latencyJitterMilliseconds;
+        this.latencyMinimumMilliseconds = latencyMinimumMilliseconds;
+        this.latencyMaximumMilliseconds = latencyMaximumMilliseconds;
         this.errorCode = errorCode;
         this.trafficPercentage = trafficPercentage;
+        this.dropPercentage = dropPercentage;
         this.routeFilters = routeFilters == null ? List.of() : List.copyOf(routeFilters);
         this.approvalId = approvalId;
         this.status = status;
@@ -169,8 +185,12 @@ public class ChaosRunEntity {
                 faultType,
                 requestedDurationSeconds,
                 latencyMilliseconds,
+                latencyJitterMilliseconds,
+                latencyMinimumMilliseconds,
+                latencyMaximumMilliseconds,
                 errorCode,
                 trafficPercentage,
+                dropPercentage,
                 routeFilters,
                 approvalId,
                 status,
@@ -195,8 +215,12 @@ public class ChaosRunEntity {
                 faultType,
                 requestedDurationSeconds,
                 latencyMilliseconds,
+                latencyJitterMilliseconds,
+                latencyMinimumMilliseconds,
+                latencyMaximumMilliseconds,
                 errorCode,
                 trafficPercentage,
+                dropPercentage,
                 routeFilters,
                 approvalId,
                 status,
