@@ -2,6 +2,14 @@
 
 Spring Boot control-plane service for the Chaos Platform.
 
+## Documentation map
+
+- [Platform architecture](docs/platform-architecture.md): control-plane components, execution model, storage layout, event-bus status, and observability surfaces on the current `main` branch.
+- [Setup guide](docs/local-development.md): contributor, operator, and demo/evaluation paths with bootstrap, environment variables, proxy notes, and troubleshooting.
+- [Example walkthroughs](docs/example-walkthroughs.md): copy-paste API scenarios for latency drills, approval-gated production runs, run analysis, and the current demo-only HTTP error flow.
+- [Security and RBAC](docs/security-auth.md): OIDC mode, local dev auth mode, and route permissions.
+- [CI quality gates](docs/ci-quality-gates.md): local and GitHub Actions verification workflow.
+
 ## Authentication and RBAC
 
 The platform now defaults to `chaos.auth.mode=oidc` outside local development. Configure your OIDC client registration with Spring Security and expose a claim that contains one or more of these role names:
@@ -137,7 +145,7 @@ make local-reset
 make bootstrap-local
 ```
 
-Full step-by-step bootstrap, reset, and troubleshooting notes live in `docs/local-development.md`.
+Full setup, architecture, and walkthrough notes live in `docs/local-development.md`, `docs/platform-architecture.md`, and `docs/example-walkthroughs.md`.
 CI workflow and branch-gate details live in `docs/ci-quality-gates.md`.
 
 ## Default local endpoints

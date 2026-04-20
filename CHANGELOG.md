@@ -4,6 +4,7 @@ All notable changes to this project are tracked in this file.
 
 ## Unreleased
 
+- MYG-51: added platform architecture documentation, a persona-based setup guide, and example walkthroughs for latency drills, approval-gated production runs, run analysis, and the current demo-only HTTP error flow. Testing note: documentation validated against local scripts, controller contracts, and existing route/data fixtures on `main`.
 - MYG-38: added GitHub Actions quality gates for backend verification, static UI smoke checks, and docs/changelog enforcement on pull requests and `main`; added a mainline artifact upload job plus a `make ci-local` wrapper for local pre-push verification.
 - Added `MYG-4` experiment CRUD APIs with structured selector, fault, safety-rule, and environment metadata payloads plus field-level validation for invalid durations, unsupported fault parameters, and incomplete target selectors.
 - MYG-28: standardized the local developer workflow around Docker Compose for PostgreSQL, Redis, and RabbitMQ; verified bootstrap seeding for sample agents; and added reset, health-check, and troubleshooting documentation. Testing note: run `make test-local`, then use `make bootstrap-local` and `make local-health` for the local stack smoke check.
