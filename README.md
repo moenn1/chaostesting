@@ -1,6 +1,6 @@
 # Chaos Platform
 
-Spring Boot control-plane service for the Chaos Platform MVP.
+Spring Boot control-plane service for the Chaos Platform.
 
 ## Local development
 
