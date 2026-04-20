@@ -1,0 +1,95 @@
+name: Quality Gates
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repo-hygiene:
+    name: Repo Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce docs and changelog updates on pull requests
+        if: github.event_name == 'pull_request'
+        run: ./scripts/ci/check-docs-changelog.sh "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"
+
+      - name: Enforce docs and changelog updates on mainline pushes
+        if: github.event_name == 'push'
+        run: ./scripts/ci/check-docs-changelog.sh "${{ github.event.before }}" "${{ github.sha }}"
+
+  backend-verify:
+    name: Backend Verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Verify Maven build and tests
+        run: mvn -B -ntp verify
+
+  static-ui-smoke:
+    name: Static UI Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Smoke-check static UI assets
+        run: ./scripts/ci/check-static-assets.sh
+
+  mainline-artifact:
+    name: Mainline Artifact
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - repo-hygiene
+      - backend-verify
+      - static-ui-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Build release artifact
+        run: mvn -B -ntp -DskipTests package
+
+      - name: Upload packaged JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-control-plane-${{ github.sha }}
+          path: target/*.jar
+          if-no-files-found: error

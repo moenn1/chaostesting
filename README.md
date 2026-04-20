@@ -116,6 +116,12 @@ Run the automated test suite:
 make test-local
 ```
 
+Run the same repo quality-gate bundle that backs GitHub Actions:
+
+```bash
+make ci-local
+```
+
 The local bootstrap initializes PostgreSQL, Redis, and RabbitMQ. PostgreSQL is pre-seeded with sample agents so the first API tickets can query real data immediately after the app starts.
 
 Verify the seeded agents:
@@ -132,6 +138,7 @@ make bootstrap-local
 ```
 
 Full step-by-step bootstrap, reset, and troubleshooting notes live in `docs/local-development.md`.
+CI workflow and branch-gate details live in `docs/ci-quality-gates.md`.
 
 ## Default local endpoints
 
