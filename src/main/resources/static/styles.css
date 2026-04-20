@@ -39,7 +39,9 @@ body {
 }
 
 button,
-select {
+select,
+input,
+textarea {
   font: inherit;
 }
 
@@ -338,6 +340,11 @@ a {
   cursor: wait;
 }
 
+.danger-button {
+  background: linear-gradient(135deg, rgba(255, 127, 107, 0.26), rgba(255, 255, 255, 0.08));
+  border-color: rgba(255, 127, 107, 0.38);
+}
+
 .metric-grid,
 .story-grid,
 .surface-grid,
@@ -472,6 +479,14 @@ a {
   margin: 0;
 }
 
+.live-route-note {
+  margin: 0.9rem 0 0;
+  padding: 0.85rem 1rem;
+  border-radius: 1rem;
+  background: rgba(120, 164, 255, 0.12);
+  border: 1px solid rgba(120, 164, 255, 0.28);
+}
+
 .resource-link {
   color: #fff5db;
   text-decoration: none;
@@ -515,6 +530,25 @@ a {
   background: var(--info-soft);
   border-color: rgba(120, 164, 255, 0.36);
   color: #d9e6ff;
+}
+
+.status-chip.assigned,
+.status-chip.stop-requested {
+  background: rgba(120, 164, 255, 0.14);
+  border-color: rgba(120, 164, 255, 0.34);
+  color: #d9e6ff;
+}
+
+.status-chip.injecting {
+  background: var(--accent-soft);
+  border-color: var(--border-strong);
+  color: #fff1cc;
+}
+
+.status-chip.completed {
+  background: var(--success-soft);
+  border-color: rgba(80, 197, 141, 0.36);
+  color: #d2ffe8;
 }
 
 .status-chip.failed,
@@ -673,6 +707,145 @@ a {
   margin-top: 0.25rem;
 }
 
+.live-run-shell {
+  align-items: start;
+}
+
+.live-run-list-body,
+.live-run-detail-body,
+.live-run-agents-body,
+.live-run-timeline-body {
+  min-height: 100%;
+}
+
+.live-run-list,
+.live-agent-grid,
+.timeline-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.live-agent-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.live-run-item {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  text-decoration: none;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.live-run-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.live-run-item.selected {
+  background: linear-gradient(135deg, rgba(255, 178, 72, 0.18), rgba(255, 255, 255, 0.05));
+  border-color: var(--border-strong);
+}
+
+.live-fact-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.live-stop-panel {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.live-stop-panel-confirmed {
+  background: linear-gradient(180deg, rgba(80, 197, 141, 0.12), rgba(255, 255, 255, 0.03));
+}
+
+.live-control-grid {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.live-control-field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.live-control-field input,
+.live-control-field textarea {
+  width: 100%;
+  padding: 0.78rem 0.95rem;
+  border-radius: 0.95rem;
+  border: 1px solid var(--border);
+  color: inherit;
+  background: rgba(255, 255, 255, 0.06);
+  resize: vertical;
+}
+
+.live-callout {
+  padding: 0.8rem 0.95rem;
+  border-radius: 0.95rem;
+  background: rgba(120, 164, 255, 0.12);
+  border: 1px solid rgba(120, 164, 255, 0.28);
+}
+
+.live-callout.success {
+  background: rgba(80, 197, 141, 0.14);
+  border-color: rgba(80, 197, 141, 0.34);
+}
+
+.live-callout.error {
+  background: rgba(255, 127, 107, 0.16);
+  border-color: rgba(255, 127, 107, 0.34);
+}
+
+.timeline-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.timeline-marker {
+  width: 0.9rem;
+  height: 0.9rem;
+  margin-top: 0.5rem;
+  border-radius: 999px;
+  border: 2px solid var(--border-strong);
+  background: rgba(255, 178, 72, 0.22);
+}
+
+.timeline-copy {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.timeline-item.completed .timeline-marker {
+  background: rgba(80, 197, 141, 0.24);
+  border-color: rgba(80, 197, 141, 0.42);
+}
+
+.timeline-item.failed .timeline-marker {
+  background: rgba(255, 127, 107, 0.24);
+  border-color: rgba(255, 127, 107, 0.42);
+}
+
 @keyframes shimmer {
   0% {
     background-position: 220% 0;
@@ -719,7 +892,9 @@ a {
   .metric-grid,
   .dashboard-grid,
   .run-grid,
-  .linked-fact-grid {
+  .linked-fact-grid,
+  .live-agent-grid,
+  .live-fact-grid {
     grid-template-columns: 1fr;
   }
 }

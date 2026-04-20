@@ -1,6 +1,9 @@
 const STORAGE_KEY = 'chaos-platform.active-environment';
 const AUTO_REFRESH_KEY = 'chaos-platform.dashboard-auto-refresh';
 const DASHBOARD_REFRESH_MS = 15000;
+const LIVE_RUN_REFRESH_MS = 10000;
+const DEFAULT_STOP_OPERATOR = 'web-console';
+const DEFAULT_STOP_REASON = 'Manual rollback requested from the live run view.';
 
 const environments = [
   {
@@ -1274,6 +1277,18 @@ const dashboardState = {
   refreshing: false,
 };
 
+const liveRunsState = {
+  refreshing: false,
+  refreshCount: 0,
+  lastUpdatedAt: new Date(),
+  stopPendingId: null,
+  stopFeedback: '',
+  stopError: '',
+  operator: DEFAULT_STOP_OPERATOR,
+  reason: DEFAULT_STOP_REASON,
+  runOverrides: {},
+};
+
 const routeKey = routes[document.body.dataset.route] ? document.body.dataset.route : 'dashboard';
 const sidebarNode = document.getElementById('sidebar');
 const contentNode = document.getElementById('content');
@@ -1284,6 +1299,22 @@ document.addEventListener('change', (event) => {
   if (target instanceof HTMLSelectElement && target.id === 'environment-select') {
     localStorage.setItem(STORAGE_KEY, target.value);
     render();
+  }
+});
+
+document.addEventListener('input', (event) => {
+  const target = event.target;
+
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (target instanceof HTMLInputElement && target.dataset.liveRunField === 'operator') {
+    liveRunsState.operator = target.value;
+  }
+
+  if (target instanceof HTMLTextAreaElement && target.dataset.liveRunField === 'reason') {
+    liveRunsState.reason = target.value;
   }
 });
 
@@ -1317,6 +1348,16 @@ document.addEventListener('click', (event) => {
     dashboardState.autoRefreshEnabled = !dashboardState.autoRefreshEnabled;
     localStorage.setItem(AUTO_REFRESH_KEY, dashboardState.autoRefreshEnabled ? 'on' : 'off');
     renderContent();
+    return;
+  }
+
+  if (actionButton.dataset.action === 'refresh-live-runs') {
+    triggerLiveRunRefresh();
+    return;
+  }
+
+  if (actionButton.dataset.action === 'stop-live-run' && actionButton.dataset.runId) {
+    requestLiveRunStop(actionButton.dataset.runId);
   }
 });
 
@@ -1326,6 +1367,14 @@ if (routeKey === 'dashboard') {
       triggerDashboardRefresh();
     }
   }, DASHBOARD_REFRESH_MS);
+}
+
+if (routeKey === 'live-runs') {
+  window.setInterval(() => {
+    if (!liveRunsState.stopPendingId && !liveRunsState.refreshing) {
+      triggerLiveRunRefresh(true);
+    }
+  }, LIVE_RUN_REFRESH_MS);
 }
 
 render();
@@ -1397,6 +1446,11 @@ function renderContent() {
 
   if (routeKey === 'dashboard') {
     contentNode.innerHTML = renderDashboard(environment, route);
+    return;
+  }
+
+  if (routeKey === 'live-runs') {
+    contentNode.innerHTML = renderLiveRuns(environment, route);
     return;
   }
 
@@ -1535,6 +1589,660 @@ function renderDashboard(environment, route) {
       </section>
     </section>
   `;
+}
+
+function renderLiveRuns(environment, route) {
+  const view = getLiveRunView(environment);
+  const selectedRun = view.selected;
+  const selectedAgents = selectedRun ? buildLiveRunAgents(selectedRun) : [];
+  const selectedTimeline = selectedRun ? buildLiveRunTimeline(selectedRun) : [];
+  const metrics = getLiveRunMetrics(view, selectedAgents);
+
+  return `
+    ${renderTopbar(environment)}
+
+    <section class="page">
+      <header class="hero-card live-hero">
+        <div class="hero-copy">
+          <p class="hero-kicker">${route.eyebrow}</p>
+          <h2>${route.title}</h2>
+          <p>${route.description}</p>
+          <p class="hero-emphasis">
+            ${
+              selectedRun
+                ? escapeHtml(selectedRun.summary)
+                : route.detailEmptyMessage
+            }
+          </p>
+          ${
+            view.banner
+              ? `<p class="live-route-note">${escapeHtml(view.banner)}</p>`
+              : ''
+          }
+        </div>
+        <div class="hero-actions">
+          <div class="hero-context">
+            <span>Selected run</span>
+            <strong>${selectedRun ? escapeHtml(selectedRun.title) : 'No run selected'}</strong>
+            <p class="hero-context-copy">
+              ${selectedRun ? escapeHtml(selectedRun.targetSnapshot) : route.listEmptyMessage}
+            </p>
+          </div>
+          <div class="hero-context">
+            <span>Last updated</span>
+            <strong>${formatTime(liveRunsState.lastUpdatedAt)}</strong>
+            <p class="hero-context-copy">
+              ${liveRunsState.refreshing ? 'Refreshing stubbed run state.' : 'Stubbed live pulse updates every 10 seconds.'}
+            </p>
+          </div>
+          <div class="hero-context">
+            <span>Stop control</span>
+            <strong>${selectedRun ? escapeHtml(selectedRun.stopLabel) : 'Unavailable'}</strong>
+            <p class="hero-context-copy">
+              ${selectedRun ? escapeHtml(selectedRun.stopNote) : 'Select or create a run to issue a stop.'}
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <section class="metric-grid" aria-label="${route.navLabel} summary metrics">
+        ${metrics
+          .map(
+            (metric) => `
+              <article class="metric-card">
+                <p class="metric-label">${metric.label}</p>
+                <h3>${escapeHtml(metric.value)}</h3>
+                <p class="metric-note">${escapeHtml(metric.note)}</p>
+              </article>
+            `,
+          )
+          .join('')}
+      </section>
+
+      <section class="dashboard-grid live-run-shell">
+        <article class="surface-card live-run-list-surface">
+          <div class="surface-header">
+            <div>
+              <p class="surface-label">Streaming run list</p>
+              <h3>Runs in ${escapeHtml(environment.name)}</h3>
+            </div>
+            <button
+              type="button"
+              class="ghost-button"
+              data-action="refresh-live-runs"
+              ${liveRunsState.refreshing ? 'disabled' : ''}
+            >
+              ${liveRunsState.refreshing ? 'Refreshing...' : 'Refresh now'}
+            </button>
+          </div>
+          <div class="surface-body live-run-list-body">
+            ${renderLiveRunList(view, route)}
+          </div>
+        </article>
+
+        <article class="surface-card live-run-detail-surface">
+          <div class="surface-header">
+            <div>
+              <p class="surface-label">Run detail</p>
+              <h3>${selectedRun ? escapeHtml(selectedRun.title) : route.detailSurfaceTitle}</h3>
+            </div>
+            ${selectedRun ? renderStatusChip(selectedRun.statusLabel) : ''}
+          </div>
+          <div class="surface-body live-run-detail-body">
+            ${renderLiveRunDetail(selectedRun, route)}
+          </div>
+        </article>
+      </section>
+
+      <section class="dashboard-grid live-run-shell">
+        <article class="surface-card live-run-agent-surface">
+          <div class="surface-header">
+            <div>
+              <p class="surface-label">Per-agent execution</p>
+              <h3>Progress by execution lane</h3>
+            </div>
+            ${selectedRun ? `<span class="context-pill">${escapeHtml(selectedAgents.length)} agents in frame</span>` : ''}
+          </div>
+          <div class="surface-body live-run-agents-body">
+            ${renderLiveRunAgents(selectedAgents)}
+          </div>
+        </article>
+
+        <article class="surface-card live-run-timeline-surface">
+          <div class="surface-header">
+            <div>
+              <p class="surface-label">Execution timeline</p>
+              <h3>Fault phase and rollback path</h3>
+            </div>
+            ${selectedRun ? `<span class="context-pill">${escapeHtml(selectedRun.phase)}</span>` : ''}
+          </div>
+          <div class="surface-body live-run-timeline-body">
+            ${renderLiveRunTimeline(selectedTimeline, route)}
+          </div>
+        </article>
+      </section>
+    </section>
+  `;
+}
+
+function renderLiveRunList(view, route) {
+  if (liveRunsState.refreshing && liveRunsState.refreshCount === 0) {
+    return `
+      <div class="preview-stack" aria-label="Live run list loading">
+        <div class="skeleton-panel"></div>
+        <div class="skeleton-panel"></div>
+        <div class="skeleton-panel"></div>
+      </div>
+    `;
+  }
+
+  if (!view.list.length) {
+    return `
+      <div class="preview-message">
+        <p class="preview-title">No runs in scope</p>
+        <p class="preview-copy">${escapeHtml(route.listEmptyMessage)}</p>
+        <button type="button" class="ghost-button" data-action="refresh-live-runs">Refresh preview</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="live-run-list">
+      ${view.list
+        .map((run) => renderLiveRunListItem(run, view.selected && view.selected.id === run.id))
+        .join('')}
+    </div>
+  `;
+}
+
+function renderLiveRunListItem(run, isSelected) {
+  return `
+    <a class="live-run-item${isSelected ? ' selected' : ''}" href="/live-runs/?run=${encodeURIComponent(run.id)}">
+      <div class="run-card-header">
+        <div>
+          <p class="run-card-eyebrow">${escapeHtml(run.sourceLabel)}</p>
+          <h3>${escapeHtml(run.title)}</h3>
+        </div>
+        ${renderStatusChip(run.statusLabel)}
+      </div>
+      <div class="meta-row">
+        <span>${escapeHtml(run.environmentLabel)}</span>
+        <span>${escapeHtml(run.runtimeLabel)}</span>
+      </div>
+      <p class="run-note">${escapeHtml(run.targetSnapshot)}</p>
+      <div class="link-row">
+        <span>${escapeHtml(run.phase)}</span>
+        <span>${escapeHtml(run.stopLabel)}</span>
+      </div>
+    </a>
+  `;
+}
+
+function renderLiveRunDetail(run, route) {
+  if (!run) {
+    return `
+      <div class="preview-message">
+        <p class="preview-title">No detail selected</p>
+        <p class="preview-copy">${route.detailEmptyMessage}</p>
+      </div>
+    `;
+  }
+
+  const facts = buildLiveRunFacts(run);
+
+  return `
+    <article class="linked-detail live-run-detail-card">
+      ${
+        liveRunsState.stopFeedback
+          ? `<div class="live-callout success">${escapeHtml(liveRunsState.stopFeedback)}</div>`
+          : ''
+      }
+      ${
+        liveRunsState.stopError
+          ? `<div class="live-callout error">${escapeHtml(liveRunsState.stopError)}</div>`
+          : ''
+      }
+      <p class="linked-detail-copy">${escapeHtml(run.summary)}</p>
+      <div class="linked-fact-grid live-fact-grid">
+        ${facts
+          .map(
+            (fact) => `
+              <div class="linked-fact">
+                <span>${escapeHtml(fact.label)}</span>
+                <strong>${escapeHtml(fact.value)}</strong>
+              </div>
+            `,
+          )
+          .join('')}
+      </div>
+      ${
+        run.bullets.length
+          ? `
+            <ul class="detail-list">
+              ${run.bullets.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+            </ul>
+          `
+          : ''
+      }
+      <div class="link-row">
+        ${run.links.map((link) => `<a class="resource-link" href="${link.href}">${escapeHtml(link.label)}</a>`).join('')}
+      </div>
+      ${renderStopControl(run)}
+    </article>
+  `;
+}
+
+function renderStopControl(run) {
+  if (run.stopCommandIssuedAt) {
+    return `
+      <section class="live-stop-panel live-stop-panel-confirmed">
+        <div class="section-heading compact">
+          <div>
+            <p class="section-label">Stop control</p>
+            <h3>Stop confirmation captured</h3>
+          </div>
+          ${renderStatusChip('Stopped')}
+        </div>
+        <p class="preview-copy">
+          Stop requested by ${escapeHtml(run.stopCommandIssuedBy || 'unknown operator')}
+          ${run.stopCommandIssuedAt ? ` at ${escapeHtml(formatDateTime(run.stopCommandIssuedAt))}` : ''}.
+        </p>
+        <p class="preview-copy">${escapeHtml(run.stopCommandReason || 'No operator reason was recorded.')}</p>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="live-stop-panel">
+      <div class="section-heading compact">
+        <div>
+          <p class="section-label">Stop control</p>
+          <h3>Request rollback now</h3>
+        </div>
+        ${renderStatusChip('Running')}
+      </div>
+      <div class="live-control-grid">
+        <label class="live-control-field">
+          <span class="field-label">Operator</span>
+          <input
+            type="text"
+            data-live-run-field="operator"
+            value="${escapeHtml(liveRunsState.operator)}"
+            autocomplete="off"
+          />
+        </label>
+        <label class="live-control-field">
+          <span class="field-label">Reason</span>
+          <textarea data-live-run-field="reason" rows="3">${escapeHtml(liveRunsState.reason)}</textarea>
+        </label>
+      </div>
+      <div class="refresh-actions">
+        <button
+          type="button"
+          class="primary-button danger-button"
+          data-action="stop-live-run"
+          data-run-id="${run.id}"
+          ${liveRunsState.stopPendingId === run.id ? 'disabled' : ''}
+        >
+          ${liveRunsState.stopPendingId === run.id ? 'Requesting stop...' : 'Stage stop confirmation'}
+        </button>
+        <button type="button" class="ghost-button" data-action="refresh-live-runs">Refresh status</button>
+      </div>
+      <p class="preview-copy">
+        Uses stubbed interaction state so the confirmation path is visible before the backend timeline contract lands.
+      </p>
+    </section>
+  `;
+}
+
+function renderLiveRunAgents(agentCards) {
+  if (!agentCards.length) {
+    return `
+      <div class="preview-message">
+        <p class="preview-title">No agents to show</p>
+        <p class="preview-copy">Select a run to inspect assigned, injecting, stopped, completed, or failed execution lanes.</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="live-agent-grid">
+      ${agentCards
+        .map(
+          (agent) => `
+            <article class="agent-card live-agent-card">
+              <div class="list-card-header">
+                <div>
+                  <p class="run-card-eyebrow">${escapeHtml(agent.role)}</p>
+                  <h3>${escapeHtml(agent.name)}</h3>
+                </div>
+                ${renderStatusChip(agent.status)}
+              </div>
+              <div class="health-row">
+                <div class="health-track">
+                  <span style="width: ${agent.progress}%;"></span>
+                </div>
+                <span>${escapeHtml(String(agent.progress))}% complete</span>
+              </div>
+              <p class="run-note">${escapeHtml(agent.summary)}</p>
+            </article>
+          `,
+        )
+        .join('')}
+    </div>
+  `;
+}
+
+function renderLiveRunTimeline(timelineItems, route) {
+  if (!timelineItems.length) {
+    return `
+      <div class="preview-message">
+        <p class="preview-title">Timeline unavailable</p>
+        <p class="preview-copy">${route.detailEmptyMessage}</p>
+      </div>
+    `;
+  }
+
+  return `
+    <ol class="timeline-list">
+      ${timelineItems
+        .map(
+          (item) => `
+            <li class="timeline-item ${toToken(item.state)}">
+              <div class="timeline-marker"></div>
+              <div class="timeline-copy">
+                <div class="list-card-header">
+                  <div>
+                    <p class="run-card-eyebrow">${escapeHtml(item.kicker)}</p>
+                    <h3>${escapeHtml(item.title)}</h3>
+                  </div>
+                  ${renderStatusChip(item.state)}
+                </div>
+                <p class="run-note">${escapeHtml(item.summary)}</p>
+              </div>
+            </li>
+          `,
+        )
+        .join('')}
+    </ol>
+  `;
+}
+
+function getLiveRunView(environment) {
+  const queryRunId = new URLSearchParams(window.location.search).get('run');
+  const scenarioRuns = getScenarioRuns(environment.id);
+  const selected = queryRunId ? scenarioRuns.find((run) => run.id === queryRunId) || scenarioRuns[0] : scenarioRuns[0] || null;
+
+  return {
+    banner: 'Timeline and stop flows on this screen are currently stubbed so layout and operator interactions can ship ahead of the blocked event contract.',
+    list: scenarioRuns,
+    selected,
+  };
+}
+
+function getLiveRunMetrics(view, selectedAgents) {
+  const injectingCount = selectedAgents.filter((agent) => agent.status === 'Injecting').length;
+  const activeCount = selectedAgents.filter((agent) => ['Assigned', 'Injecting'].includes(agent.status)).length;
+  const selectedRun = view.selected;
+
+  return [
+    {
+      label: 'Runs streaming',
+      value: padMetric(view.list.length),
+      note: 'Stubbed run cards keep the layout stable while the backend event contract is still blocked.',
+    },
+    {
+      label: 'Agents mid-plan',
+      value: padMetric(activeCount),
+      note: selectedRun
+        ? `${injectingCount} injecting, ${Math.max(selectedAgents.length - injectingCount, 0)} in verification or rollback lanes.`
+        : 'Select a run to inspect per-agent execution progress.',
+    },
+    {
+      label: 'Stop control',
+      value: selectedRun ? selectedRun.stopLabel : 'Unavailable',
+      note: selectedRun
+        ? selectedRun.stopNote
+        : 'Select a run to inspect the stop confirmation path.',
+    },
+  ];
+}
+
+function getScenarioRuns(environmentId) {
+  const scenarioConfig = linkedDetails['live-runs'];
+  const prefixes = {
+    'local-dev': 'run-dev-',
+    'staging-west': 'run-stg-',
+    'prod-shadow': 'run-prod-',
+  };
+  const prefix = prefixes[environmentId];
+
+  return Object.entries(scenarioConfig.records)
+    .filter(([id]) => id.startsWith(prefix))
+    .map(([id, record]) => normalizeScenarioRun(id, record, environmentId));
+}
+
+function normalizeScenarioRun(id, record, environmentId) {
+  const facts = Object.fromEntries(record.facts.map((fact) => [fact.label, fact.value]));
+  const links = record.links || [];
+  const override = liveRunsState.runOverrides[id] || {};
+  const statusLabel = override.statusLabel || record.status;
+  const lifecycle = override.lifecycle || toToken(statusLabel);
+  const pulse = liveRunsState.refreshCount + 1;
+
+  return {
+    id,
+    sourceLabel: override.sourceLabel || `Simulated pulse ${padMetric(pulse)}`,
+    environmentId,
+    environmentLabel: environments.find((item) => item.id === environmentId)?.name || environmentId,
+    title: record.title,
+    statusLabel,
+    summary: override.summary || record.summary,
+    targetSnapshot: `${facts.Service || record.title} / ${facts['Blast radius'] || 'targeted slice'}`,
+    runtimeLabel: override.runtimeLabel || `Heartbeat ${padMetric(pulse)}`,
+    phase: override.phase || facts.Phase || record.status,
+    stopLabel: override.stopLabel || getStopLabel(statusLabel),
+    stopNote: override.stopNote || getStopNote(statusLabel),
+    bullets: override.bullets || record.bullets || [],
+    links,
+    lifecycle,
+    faultType: inferFaultType(record.title, record.summary),
+    requestedDurationSeconds: inferDurationSeconds(record.summary),
+    stopCommandIssuedAt: override.stopCommandIssuedAt || null,
+    stopCommandIssuedBy: override.stopCommandIssuedBy || null,
+    stopCommandReason: override.stopCommandReason || null,
+  };
+}
+
+function buildLiveRunFacts(run) {
+  return [
+    { label: 'Experiment', value: run.title },
+    { label: 'Environment', value: run.environmentLabel },
+    { label: 'Target snapshot', value: run.targetSnapshot },
+    { label: 'Current phase', value: run.phase },
+    {
+      label: 'Requested duration',
+      value: run.requestedDurationSeconds ? formatDuration(run.requestedDurationSeconds) : 'Scenario fixture',
+    },
+    { label: 'Status', value: run.statusLabel },
+  ];
+}
+
+function buildLiveRunAgents(run) {
+  const plans = {
+    running: [
+      ['Lease coordinator', 'Control plane', 'Assigned', 42, 'Keeps the run lease and stop budget current.'],
+      ['Fault injector', 'Failure lane', 'Injecting', 78, `Applying ${formatFaultName(run.faultType).toLowerCase()} to the selected slice.`],
+      ['Guardrail verifier', 'Safety lane', 'Completed', 100, 'Initial guardrail checks passed before injection widened.'],
+      ['Rollback watcher', 'Recovery lane', 'Assigned', 26, 'Ready to converge the run back to steady state on operator stop.'],
+    ],
+    'stop-requested': [
+      ['Lease coordinator', 'Control plane', 'Stopped', 100, 'Accepted the stop request and closed the active lease.'],
+      ['Fault injector', 'Failure lane', 'Stopped', 100, 'Injection lane has been told to drain and stand down.'],
+      ['Guardrail verifier', 'Safety lane', 'Completed', 100, 'Latest guardrail snapshot is preserved for the rollback record.'],
+      ['Rollback watcher', 'Recovery lane', 'Assigned', 58, 'Validating that the target returns to baseline after the stop.'],
+    ],
+    recovering: [
+      ['Lease coordinator', 'Control plane', 'Completed', 100, 'Execution ownership has shifted to recovery validation.'],
+      ['Fault injector', 'Failure lane', 'Completed', 100, 'The active fault phase has already ended.'],
+      ['Guardrail verifier', 'Safety lane', 'Assigned', 52, 'Watching recovery SLOs while the service settles.'],
+      ['Rollback watcher', 'Recovery lane', 'Completed', 100, 'Rollback commands have already cleared.'],
+    ],
+    holding: [
+      ['Lease coordinator', 'Control plane', 'Assigned', 33, 'Run is staged but not widening without explicit approval.'],
+      ['Fault injector', 'Failure lane', 'Completed', 100, 'Injector is prepared and waiting for the policy gate.'],
+      ['Guardrail verifier', 'Safety lane', 'Assigned', 24, 'Guardrail checks are pinned before the next phase can begin.'],
+      ['Rollback watcher', 'Recovery lane', 'Assigned', 18, 'Rollback path is armed even though the run is paused.'],
+    ],
+    failed: [
+      ['Lease coordinator', 'Control plane', 'Failed', 91, 'The coordinator recorded a terminal exception during the run.'],
+      ['Fault injector', 'Failure lane', 'Stopped', 100, 'Injector was halted once the failure path was detected.'],
+      ['Guardrail verifier', 'Safety lane', 'Completed', 100, 'Last safe checkpoint was captured before the failure.'],
+      ['Rollback watcher', 'Recovery lane', 'Assigned', 61, 'Recovery actions remain active while the incident is reviewed.'],
+    ],
+    default: [
+      ['Lease coordinator', 'Control plane', 'Assigned', 35, 'Run ownership is active in the control plane.'],
+      ['Fault injector', 'Failure lane', 'Assigned', 35, 'Injector is waiting for the next execution step.'],
+      ['Guardrail verifier', 'Safety lane', 'Assigned', 35, 'Guardrail checks remain attached to the run.'],
+      ['Rollback watcher', 'Recovery lane', 'Assigned', 35, 'Rollback path is on standby.'],
+    ],
+  };
+  const lifecycle = plans[run.lifecycle] ? run.lifecycle : 'default';
+
+  return plans[lifecycle].map(([name, role, status, progress, summary]) => ({
+    name,
+    role,
+    status,
+    progress,
+    summary,
+  }));
+}
+
+function buildLiveRunTimeline(run) {
+  if (run.lifecycle === 'stop-requested') {
+    return [
+      {
+        kicker: run.environmentLabel,
+        title: 'Run authorized',
+        state: 'Completed',
+        summary: `The control plane authorized ${run.title.toLowerCase()} for ${run.targetSnapshot}.`,
+      },
+      {
+        kicker: 'Fault active',
+        title: 'Injection phase started',
+        state: 'Completed',
+        summary: `The failure lane widened on ${run.targetSnapshot} before the operator requested a rollback.`,
+      },
+      {
+        kicker: 'Operator action',
+        title: 'Stop request accepted',
+        state: 'Stopped',
+        summary: run.stopCommandReason || 'A manual stop request was captured for this run.',
+      },
+      {
+        kicker: 'Recovery',
+        title: 'Rollback confirmation in progress',
+        state: 'Assigned',
+        summary: 'Recovery lanes are now validating that the target returns to its baseline.',
+      },
+    ];
+  }
+
+  if (run.lifecycle === 'holding') {
+    return [
+      {
+        kicker: run.environmentLabel,
+        title: 'Run staged',
+        state: 'Completed',
+        summary: `The run has been prepared for ${run.targetSnapshot}.`,
+      },
+      {
+        kicker: 'Policy gate',
+        title: 'Approval hold remains active',
+        state: 'Assigned',
+        summary: 'Execution is intentionally paused while approval and guardrail checks stay visible.',
+      },
+      {
+        kicker: 'Failure lane',
+        title: 'Injection is waiting',
+        state: 'Assigned',
+        summary: 'The injector will only widen after the policy gate is cleared.',
+      },
+    ];
+  }
+
+  if (run.lifecycle === 'failed') {
+    return [
+      {
+        kicker: run.environmentLabel,
+        title: 'Run authorized',
+        state: 'Completed',
+        summary: `The run started normally on ${run.targetSnapshot}.`,
+      },
+      {
+        kicker: 'Failure lane',
+        title: 'Execution fault detected',
+        state: 'Failed',
+        summary: 'The run hit an execution error and rolled into the incident path.',
+      },
+      {
+        kicker: 'Recovery',
+        title: 'Rollback remains active',
+        state: 'Assigned',
+        summary: 'Operators still need the stop and recovery context in frame while follow-up continues.',
+      },
+    ];
+  }
+
+  if (run.lifecycle === 'recovering') {
+    return [
+      {
+        kicker: run.environmentLabel,
+        title: 'Run authorized',
+        state: 'Completed',
+        summary: `The run completed its fault phase on ${run.targetSnapshot}.`,
+      },
+      {
+        kicker: 'Rollback',
+        title: 'Recovery commands finished',
+        state: 'Completed',
+        summary: 'Rollback commands were issued and cleared successfully.',
+      },
+      {
+        kicker: 'Observation',
+        title: 'Recovery verification remains active',
+        state: 'Assigned',
+        summary: 'Verifier lanes are still watching the service return to steady state.',
+      },
+    ];
+  }
+
+  return [
+    {
+      kicker: run.environmentLabel,
+      title: 'Run authorized',
+      state: 'Completed',
+      summary: `The control plane opened ${run.title.toLowerCase()} for ${run.targetSnapshot}.`,
+    },
+    {
+      kicker: 'Execution',
+      title: 'Agents assigned and streaming',
+      state: 'Assigned',
+      summary: 'Per-agent cards show the current execution lane without leaving the live run page.',
+    },
+    {
+      kicker: 'Failure lane',
+      title: 'Fault injection underway',
+      state: 'Injecting',
+      summary: run.phase,
+    },
+    {
+      kicker: 'Safety',
+      title: 'Rollback path remains armed',
+      state: 'Completed',
+      summary: 'Stop control and recovery verification stay adjacent to the active timeline.',
+    },
+  ];
 }
 
 function renderStandardRoute(environment, route) {
@@ -1912,6 +2620,72 @@ function getLinkedDetail(currentRouteKey) {
   return detailConfig.records[detailId] || null;
 }
 
+function triggerLiveRunRefresh(backgroundRefresh = false) {
+  if (liveRunsState.refreshing) {
+    return;
+  }
+
+  liveRunsState.refreshing = true;
+  liveRunsState.stopError = '';
+
+  if (!backgroundRefresh) {
+    renderContent();
+  }
+
+  window.setTimeout(() => {
+    liveRunsState.refreshing = false;
+    liveRunsState.refreshCount += 1;
+    liveRunsState.lastUpdatedAt = new Date();
+    renderContent();
+  }, 350);
+}
+
+function requestLiveRunStop(runId) {
+  if (liveRunsState.stopPendingId) {
+    return;
+  }
+
+  const operator = liveRunsState.operator.trim();
+  const reason = liveRunsState.reason.trim();
+
+  if (!operator || !reason) {
+    liveRunsState.stopError = 'Operator and reason are required before issuing a stop request.';
+    liveRunsState.stopFeedback = '';
+    renderContent();
+    return;
+  }
+
+  liveRunsState.stopPendingId = runId;
+  liveRunsState.stopFeedback = '';
+  liveRunsState.stopError = '';
+  renderContent();
+
+  window.setTimeout(() => {
+    liveRunsState.runOverrides[runId] = {
+      statusLabel: 'Stop Requested',
+      lifecycle: 'stop-requested',
+      sourceLabel: 'Stubbed operator action',
+      summary:
+        'The stop confirmation state is now visible in the same frame as agent progress so the operator workflow can be validated before backend contracts are wired.',
+      runtimeLabel: 'Stop staged just now',
+      phase: 'Rollback coordination in progress',
+      stopLabel: 'Issued',
+      stopNote: `Stubbed stop confirmation captured for ${operator}.`,
+      bullets: [
+        'The stop path stays in the same frame as the live run detail to avoid a context switch during rollback.',
+        'Per-agent state changes immediately so layout and hierarchy can be reviewed before real event data exists.',
+      ],
+      stopCommandIssuedAt: new Date().toISOString(),
+      stopCommandIssuedBy: operator,
+      stopCommandReason: reason,
+    };
+    liveRunsState.lastUpdatedAt = new Date();
+    liveRunsState.stopFeedback = `Stubbed stop confirmation captured for ${operator}.`;
+    liveRunsState.stopPendingId = null;
+    renderContent();
+  }, 450);
+}
+
 function triggerDashboardRefresh() {
   if (dashboardState.refreshing) {
     return;
@@ -1929,7 +2703,7 @@ function triggerDashboardRefresh() {
 }
 
 function renderStatusChip(label) {
-  return `<span class="status-chip ${toToken(label)}">${label}</span>`;
+  return `<span class="status-chip ${toToken(String(label))}">${escapeHtml(String(label))}</span>`;
 }
 
 function getActiveEnvironment() {
@@ -1952,4 +2726,115 @@ function padMetric(value) {
 
 function toToken(value) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
+
+function formatFaultName(faultType) {
+  const token = String(faultType || 'chaos');
+
+  return token
+    .split(/[^a-z0-9]+/i)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function inferFaultType(title, summary) {
+  const text = `${title} ${summary}`.toLowerCase();
+
+  if (text.includes('latency')) {
+    return 'latency';
+  }
+
+  if (text.includes('cpu')) {
+    return 'cpu';
+  }
+
+  if (text.includes('packet')) {
+    return 'packet loss';
+  }
+
+  if (text.includes('queue')) {
+    return 'queue pause';
+  }
+
+  return 'chaos drill';
+}
+
+function inferDurationSeconds(text) {
+  const match = String(text).match(/(\d+)\s*minute/);
+
+  if (!match) {
+    return null;
+  }
+
+  return Number(match[1]) * 60;
+}
+
+function formatDuration(seconds) {
+  if (!seconds) {
+    return 'Unknown duration';
+  }
+
+  const minutes = Math.round(seconds / 60);
+
+  if (minutes < 1) {
+    return `${seconds}s`;
+  }
+
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function formatDateTime(value) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function getStopLabel(statusLabel) {
+  switch (statusLabel) {
+    case 'Running':
+      return 'Armed';
+    case 'Holding':
+      return 'Ready';
+    case 'Recovering':
+      return 'Watch';
+    case 'Stop Requested':
+      return 'Issued';
+    default:
+      return 'Review';
+  }
+}
+
+function getStopNote(statusLabel) {
+  switch (statusLabel) {
+    case 'Running':
+      return 'Stop control remains adjacent to the active run timeline.';
+    case 'Holding':
+      return 'Rollback action should remain visible even when the run is paused.';
+    case 'Recovering':
+      return 'Operators still need the stop context while recovery settles.';
+    case 'Stop Requested':
+      return 'The stop confirmation path is already visible in this stubbed flow.';
+    default:
+      return 'This run remains useful for reviewing the operator frame.';
+  }
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
