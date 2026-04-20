@@ -1,4 +1,6 @@
 const STORAGE_KEY = 'chaos-platform.active-environment';
+const AUTO_REFRESH_KEY = 'chaos-platform.dashboard-auto-refresh';
+const DASHBOARD_REFRESH_MS = 15000;
 
 const environments = [
   {
@@ -29,32 +31,9 @@ const routes = {
     path: '/',
     navLabel: 'Dashboard',
     eyebrow: 'Command overview',
-    title: 'Reliability posture at a glance',
+    title: 'Active runs, outcomes, and fleet health',
     description:
-      'Pin active experiments, watch service health, and spot drift before a run turns into a wider incident.',
-    metrics: [
-      { label: 'Active injections', value: '03', note: '2 latency tests, 1 HTTP fault' },
-      { label: 'Healthy agents', value: '18/19', note: '1 node lagging heartbeat by 44s' },
-      { label: 'Guardrail breaches', value: '01', note: 'Pending approval for prod-shadow scope' },
-    ],
-    activityTitle: 'Current watchpoints',
-    activityItems: [
-      'Payment-service latency test trending 12% above expected blast radius.',
-      'Checkout-worker rollback timer is within safe budget.',
-      'Agent quorum in staging-west remains healthy after a restart cycle.',
-    ],
-    decisionTitle: 'Operator decisions',
-    decisionItems: [
-      'Escalate prod-shadow runs when approval is still pending after 10 minutes.',
-      'Keep agent health and safety posture visible in the shell, not buried in page content.',
-      'Default every view to the active environment so downstream pages inherit the same scope.',
-    ],
-    listSurfaceTitle: 'Active experiment queue',
-    listEmptyMessage: 'No active experiments match the selected environment yet.',
-    listErrorMessage: 'Unable to refresh the active queue from the control plane.',
-    detailSurfaceTitle: 'Run impact snapshot',
-    detailEmptyMessage: 'Pick an active run to inspect its blast radius and recovery path.',
-    detailErrorMessage: 'Impact metrics failed to load for the selected run.',
+      'Track the experiment queue, recent outcomes, failed drills, and the agent fleet from one operator surface.',
   },
   experiments: {
     path: '/experiments/',
@@ -180,6 +159,1107 @@ const routes = {
     detailEmptyMessage: 'Select an archived run to review notes, telemetry, and rerun readiness.',
     detailErrorMessage: 'Historical details failed to load for the selected run.',
   },
+  agents: {
+    path: '/agents/',
+    navLabel: 'Agents',
+    eyebrow: 'Fleet detail',
+    title: 'Inspect the agent fleet that carries each experiment',
+    description:
+      'Keep heartbeat drift, workload, and recent findings visible before a single unhealthy node turns into a blind spot.',
+    metrics: [
+      { label: 'Responding agents', value: '19/20', note: '1 node is inside the drift window' },
+      { label: 'Capacity headroom', value: '27%', note: 'Enough room for two more guarded runs' },
+      { label: 'Recovered today', value: '03', note: 'Agents returned cleanly after node churn' },
+    ],
+    activityTitle: 'Fleet management cues',
+    activityItems: [
+      'Keep heartbeat, workload, and the linked run in the same row.',
+      'Make degraded agents obvious without forcing a modal or drill-down first.',
+      'Show enough context to decide whether to drain, retry, or let the agent continue.',
+    ],
+    decisionTitle: 'How this page supports the dashboard',
+    decisionItems: [
+      'Dashboard health links should land on a real detail view, not a dead end.',
+      'Environment context remains visible so operators do not inspect the wrong fleet.',
+      'The same detail surface can expand later into logs, traces, and lease metadata.',
+    ],
+    listSurfaceTitle: 'Fleet summary',
+    listEmptyMessage: 'No registered agents are visible in this environment yet.',
+    listErrorMessage: 'The fleet registry did not return agent data.',
+    detailSurfaceTitle: 'Agent status detail',
+    detailEmptyMessage: 'Choose an agent to inspect health, workload, and recent findings.',
+    detailErrorMessage: 'The selected agent detail could not be resolved.',
+    showInNav: false,
+  },
+};
+
+const primaryRouteKeys = ['dashboard', 'experiments', 'live-runs', 'results', 'history'];
+
+const linkedDetails = {
+  experiments: {
+    param: 'experiment',
+    records: {
+      'exp-checkout-latency': {
+        title: 'Checkout latency envelope',
+        status: 'Guarded',
+        summary:
+          'Inject 350ms latency into 30% of checkout traffic to verify retry budgets after the payment-service topology change.',
+        facts: [
+          { label: 'Selector', value: 'service=checkout-api, namespace=payments' },
+          { label: 'Fault', value: '350ms latency for 8 minutes' },
+          { label: 'Guardrail', value: 'Abort if 5xx > 2.5% for 90 seconds' },
+          { label: 'Rollout', value: 'Two pods first, then namespace slice' },
+        ],
+        bullets: [
+          'Built to validate checkout retries before prod-shadow approval is opened wider.',
+          'Links directly to the active dashboard run and the fleet agent carrying the canary lane.',
+        ],
+        links: [
+          { href: '/live-runs/?run=run-stg-401', label: 'Open linked live run' },
+          { href: '/agents/?agent=agent-stg-07', label: 'Inspect lead agent' },
+        ],
+      },
+      'exp-catalog-cpu': {
+        title: 'Catalog CPU saturation',
+        status: 'Stable',
+        summary:
+          'Burn CPU in the catalog service long enough to force autoscaling and verify that checkout read paths stay insulated.',
+        facts: [
+          { label: 'Selector', value: 'service=catalog-api, namespace=shop' },
+          { label: 'Fault', value: '75% CPU burn for 6 minutes' },
+          { label: 'Guardrail', value: 'Abort if checkout p95 grows above 400ms' },
+          { label: 'Rollout', value: 'One pod, then AZ pair' },
+        ],
+        bullets: [
+          'Recent outcome recovered within the two-minute budget.',
+          'Used as the reference template for local-dev rehearsal before guarded environments.',
+        ],
+        links: [
+          { href: '/results/?result=result-stg-398', label: 'Open latest result' },
+          { href: '/', label: 'Return to dashboard' },
+        ],
+      },
+      'exp-inventory-packet-loss': {
+        title: 'Inventory broker packet loss',
+        status: 'Needs review',
+        summary:
+          'Apply packet loss across the inventory broker path to check consumer lag recovery and rollback confirmation behavior.',
+        facts: [
+          { label: 'Selector', value: 'kafka-topic=inventory.events' },
+          { label: 'Fault', value: '12% packet loss for 10 minutes' },
+          { label: 'Guardrail', value: 'Abort if lag remains above 180 seconds' },
+          { label: 'Rollout', value: 'Single partition leader first' },
+        ],
+        bullets: [
+          'The last failed run exposed a rollback confirmation timeout after leader re-election.',
+          'The degraded staging agent is still tied to the failed result investigation.',
+        ],
+        links: [
+          { href: '/results/?result=result-stg-392', label: 'Open failed result' },
+          { href: '/agents/?agent=agent-stg-07', label: 'Inspect linked agent' },
+        ],
+      },
+      'exp-shadow-db-saturation': {
+        title: 'Shadow DB saturation',
+        status: 'Approval gated',
+        summary:
+          'Drive connection churn against the shadow database tier to prove rollback speed before wider prod-shadow replay.',
+        facts: [
+          { label: 'Selector', value: 'service=shadow-db, cluster=eks-prod-shadow' },
+          { label: 'Fault', value: 'Burst connection opens for 5 minutes' },
+          { label: 'Guardrail', value: 'Stop if read latency exceeds 220ms' },
+          { label: 'Rollout', value: 'Synthetic shadow traffic only' },
+        ],
+        bullets: [
+          'This template remains approval gated and is visible in the dashboard watchlist.',
+          'Agent links land on the dedicated fleet detail view so operators can inspect lease health before promoting.',
+        ],
+        links: [
+          { href: '/agents/?agent=agent-prod-02', label: 'Inspect shadow agent' },
+          { href: '/', label: 'Return to dashboard' },
+        ],
+      },
+      'exp-local-queue-backlog': {
+        title: 'Local queue backlog rehearsal',
+        status: 'Sandbox',
+        summary:
+          'Slow local queue consumers to validate that rerun controls, badges, and recovery copy stay legible on a small fixture.',
+        facts: [
+          { label: 'Selector', value: 'service=local-queue, cluster=docker-desktop' },
+          { label: 'Fault', value: 'Pause consumers for 90 seconds' },
+          { label: 'Guardrail', value: 'Abort if end-to-end wait exceeds 6 minutes' },
+          { label: 'Rollout', value: 'Single worker process' },
+        ],
+        bullets: [
+          'Used to rehearse the experiment builder and dashboard links without backend pressure.',
+          'The linked result stays in local-dev so UI work can iterate safely.',
+        ],
+        links: [
+          { href: '/results/?result=result-dev-122', label: 'Open local result' },
+          { href: '/', label: 'Return to dashboard' },
+        ],
+      },
+    },
+  },
+  'live-runs': {
+    param: 'run',
+    records: {
+      'run-dev-118': {
+        title: 'Local queue backlog rehearsal',
+        status: 'Running',
+        summary:
+          'The local queue drill is still underway in sandbox scope and is being used to rehearse refresh and recovery UX without backend risk.',
+        facts: [
+          { label: 'Service', value: 'local-queue' },
+          { label: 'Phase', value: 'Consumer pause with backlog growth' },
+          { label: 'Blast radius', value: 'Single local worker process' },
+          { label: 'Lead agent', value: 'agent-dev-01' },
+        ],
+        bullets: [
+          'This run anchors the dashboard local-dev active-runs card.',
+          'Its linked result stays available for comparison once recovery completes.',
+        ],
+        links: [
+          { href: '/experiments/?experiment=exp-local-queue-backlog', label: 'View experiment' },
+          { href: '/agents/?agent=agent-dev-01', label: 'Inspect lead agent' },
+        ],
+      },
+      'run-dev-119': {
+        title: 'Catalog CPU saturation',
+        status: 'Recovering',
+        summary:
+          'The local catalog rehearsal has already passed the fault phase and is now validating that recovery copy remains readable as the run winds down.',
+        facts: [
+          { label: 'Service', value: 'catalog-api' },
+          { label: 'Phase', value: 'Recovery verification' },
+          { label: 'Blast radius', value: 'Single local pod' },
+          { label: 'Lead agent', value: 'agent-dev-01' },
+        ],
+        bullets: [
+          'Local-dev keeps one recovering run visible so progress treatment can be checked against healthy and failed cases.',
+          'The linked agent page exposes the collector workload rather than dropping the user into a dead end.',
+        ],
+        links: [
+          { href: '/experiments/?experiment=exp-catalog-cpu', label: 'View experiment' },
+          { href: '/agents/?agent=agent-dev-01', label: 'Inspect linked agent' },
+        ],
+      },
+      'run-stg-401': {
+        title: 'Checkout latency envelope',
+        status: 'Running',
+        summary:
+          'The latency canary is still active in staging-west, with four agents carrying the route split and rollback rails intact.',
+        facts: [
+          { label: 'Service', value: 'checkout-api' },
+          { label: 'Phase', value: 'Latency injected across 30% of traffic' },
+          { label: 'Blast radius', value: '2 checkout pods and 1 payment worker' },
+          { label: 'Lead agent', value: 'agent-stg-07' },
+        ],
+        bullets: [
+          'Progress remains inside the safe latency budget window.',
+          'Stop latency stayed below the 5-second goal on the last heartbeat.',
+        ],
+        links: [
+          { href: '/experiments/?experiment=exp-checkout-latency', label: 'View experiment' },
+          { href: '/agents/?agent=agent-stg-07', label: 'Inspect lead agent' },
+        ],
+      },
+      'run-stg-402': {
+        title: 'Checkout retry storm',
+        status: 'Holding',
+        summary:
+          'The staging retry drill is paused behind an approval gate, keeping the live-runs page useful for linked detail even when execution is not fully active yet.',
+        facts: [
+          { label: 'Service', value: 'checkout-worker' },
+          { label: 'Phase', value: 'Approval hold before retry amplification' },
+          { label: 'Blast radius', value: 'Single canary worker shard' },
+          { label: 'Lead agent', value: 'agent-stg-03' },
+        ],
+        bullets: [
+          'Approval-held runs still belong in the dashboard because they affect operator decisions and queue visibility.',
+          'The lead agent link makes it clear whether the hold is caused by fleet health or policy.',
+        ],
+        links: [
+          { href: '/experiments/?experiment=exp-checkout-latency', label: 'View experiment' },
+          { href: '/agents/?agent=agent-stg-03', label: 'Inspect lead agent' },
+        ],
+      },
+      'run-stg-403': {
+        title: 'Inventory broker packet loss',
+        status: 'Recovering',
+        summary:
+          'Rollback steps have been issued, but recovery confirmation is still being validated after the broker leader change.',
+        facts: [
+          { label: 'Service', value: 'inventory-broker' },
+          { label: 'Phase', value: 'Rollback verification' },
+          { label: 'Blast radius', value: 'inventory.events partition leader' },
+          { label: 'Lead agent', value: 'agent-stg-11' },
+        ],
+        bullets: [
+          'One related failed result is still pinned on the dashboard for follow-up.',
+          'Agent health remains green, but the degraded coordinator is visible from the fleet view.',
+        ],
+        links: [
+          { href: '/results/?result=result-stg-392', label: 'Open failed result' },
+          { href: '/experiments/?experiment=exp-inventory-packet-loss', label: 'View experiment' },
+        ],
+      },
+      'run-prod-102': {
+        title: 'Shadow DB saturation',
+        status: 'Holding',
+        summary:
+          'Prod-shadow is waiting on approval before the connection burst expands beyond the initial synthetic lane.',
+        facts: [
+          { label: 'Service', value: 'shadow-db' },
+          { label: 'Phase', value: 'Approval hold' },
+          { label: 'Blast radius', value: 'Synthetic replay only' },
+          { label: 'Lead agent', value: 'agent-prod-02' },
+        ],
+        bullets: [
+          'Guardrail posture is explicit in both the dashboard metric card and this detail view.',
+          'The dashboard refresh timestamp lets operators confirm the hold state is still current.',
+        ],
+        links: [
+          { href: '/experiments/?experiment=exp-shadow-db-saturation', label: 'View experiment' },
+          { href: '/agents/?agent=agent-prod-02', label: 'Inspect agent' },
+        ],
+      },
+    },
+  },
+  results: {
+    param: 'result',
+    records: {
+      'result-stg-398': {
+        title: 'Catalog CPU saturation',
+        status: 'Recovered',
+        summary:
+          'Catalog scaled out in time, checkout stayed inside its latency budget, and the recovery window closed in two minutes.',
+        facts: [
+          { label: 'Service', value: 'catalog-api' },
+          { label: 'Outcome', value: 'Recovered inside guardrails' },
+          { label: 'Recovery', value: '2m 14s' },
+          { label: 'Anomaly', value: 'Checkout p95 rose 19% for 90 seconds' },
+        ],
+        bullets: [
+          'This result is one of the recent clean outcomes promoted on the dashboard.',
+          'The linked experiment remains available for rerun from the builder page.',
+        ],
+        links: [
+          { href: '/experiments/?experiment=exp-catalog-cpu', label: 'View experiment' },
+          { href: '/', label: 'Return to dashboard' },
+        ],
+      },
+      'result-stg-392': {
+        title: 'Inventory broker packet loss',
+        status: 'Failed',
+        summary:
+          'The experiment exited with unresolved consumer lag because rollback confirmation timed out after a leader swap.',
+        facts: [
+          { label: 'Service', value: 'inventory-broker' },
+          { label: 'Outcome', value: 'Failed rollback confirmation' },
+          { label: 'Recovery', value: 'Needs operator review' },
+          { label: 'Anomaly', value: 'Consumer lag stayed above 180 seconds' },
+        ],
+        bullets: [
+          'This result remains pinned in the dashboard failed-runs widget.',
+          'The same agent is linked into the fleet view for immediate inspection.',
+        ],
+        links: [
+          { href: '/experiments/?experiment=exp-inventory-packet-loss', label: 'View experiment' },
+          { href: '/agents/?agent=agent-stg-07', label: 'Inspect linked agent' },
+        ],
+      },
+      'result-prod-208': {
+        title: 'Shadow DB saturation rehearsal',
+        status: 'Stopped',
+        summary:
+          'The shadow replay was stopped early when read latency brushed the guardrail, but recovery returned within one minute.',
+        facts: [
+          { label: 'Service', value: 'shadow-db' },
+          { label: 'Outcome', value: 'Stopped before threshold breach' },
+          { label: 'Recovery', value: '56s' },
+          { label: 'Anomaly', value: 'Read latency peaked at 214ms' },
+        ],
+        bullets: [
+          'Stopped outcomes still appear in the recent-outcomes widget because they shape promotion decisions.',
+          'This detail view preserves the experiment and agent links needed for follow-up.',
+        ],
+        links: [
+          { href: '/experiments/?experiment=exp-shadow-db-saturation', label: 'View experiment' },
+          { href: '/agents/?agent=agent-prod-02', label: 'Inspect agent' },
+        ],
+      },
+      'result-dev-122': {
+        title: 'Local queue backlog rehearsal',
+        status: 'Recovered',
+        summary:
+          'Local queue pressure cleared without intervention, giving the UI a safe result fixture for development.',
+        facts: [
+          { label: 'Service', value: 'local-queue' },
+          { label: 'Outcome', value: 'Recovered inside sandbox limits' },
+          { label: 'Recovery', value: '47s' },
+          { label: 'Anomaly', value: 'Queue wait grew by 2m 08s' },
+        ],
+        bullets: [
+          'This result is intentionally simple and links back into the local experiment template.',
+          'The dashboard uses it as a recent outcome when local-dev is active.',
+        ],
+        links: [
+          { href: '/experiments/?experiment=exp-local-queue-backlog', label: 'View experiment' },
+          { href: '/', label: 'Return to dashboard' },
+        ],
+      },
+    },
+  },
+  agents: {
+    param: 'agent',
+    records: {
+      'agent-dev-02': {
+        title: 'agent-dev-02',
+        status: 'Healthy',
+        summary:
+          'The local trace collector is idle and clean, which makes it a good control sample when comparing healthy fleet cards against degraded staging agents.',
+        facts: [
+          { label: 'Role', value: 'Trace collector' },
+          { label: 'Zone', value: 'docker-desktop' },
+          { label: 'Heartbeat drift', value: '1s lag' },
+          { label: 'Linked run', value: 'Catalog CPU saturation' },
+        ],
+        bullets: [
+          'Healthy control agents matter because the dashboard needs more than one severity state.',
+          'This route gives local-dev a concrete fleet detail target for every linked agent card.',
+        ],
+        links: [
+          { href: '/live-runs/?run=run-dev-119', label: 'Open linked run' },
+          { href: '/', label: 'Return to dashboard' },
+        ],
+      },
+      'agent-stg-11': {
+        title: 'agent-stg-11',
+        status: 'Healthy',
+        summary:
+          'The rollback verifier remains healthy while closing the inventory recovery path, which helps separate fleet health from workflow state.',
+        facts: [
+          { label: 'Role', value: 'Rollback verifier' },
+          { label: 'Zone', value: 'us-west-2c' },
+          { label: 'Heartbeat drift', value: '6s lag' },
+          { label: 'Linked run', value: 'Inventory broker packet loss' },
+        ],
+        bullets: [
+          'Healthy verification agents still need a detail route because they carry the last step of critical recoveries.',
+          'The dashboard fleet widget can now send this card to a real destination.',
+        ],
+        links: [
+          { href: '/live-runs/?run=run-stg-403', label: 'Open linked run' },
+          { href: '/results/?result=result-stg-392', label: 'Open related failed result' },
+        ],
+      },
+      'agent-stg-07': {
+        title: 'agent-stg-07',
+        status: 'Degraded',
+        summary:
+          'The staging coordinator recovered after a node restart, but heartbeat jitter is still above the preferred envelope.',
+        facts: [
+          { label: 'Role', value: 'Fault coordinator' },
+          { label: 'Zone', value: 'us-west-2b' },
+          { label: 'Heartbeat drift', value: '44s lag' },
+          { label: 'Linked run', value: 'Checkout latency envelope' },
+        ],
+        bullets: [
+          'The same agent is highlighted by the dashboard fleet widget and watchlist.',
+          'Degraded is intentional here so the dashboard can surface a real attention state.',
+        ],
+        links: [
+          { href: '/live-runs/?run=run-stg-401', label: 'Open linked run' },
+          { href: '/results/?result=result-stg-392', label: 'Open related failed result' },
+        ],
+      },
+      'agent-stg-03': {
+        title: 'agent-stg-03',
+        status: 'Healthy',
+        summary:
+          'Traffic routing remains clean, lease renewals are steady, and the agent is carrying a checkout approval-hold lane.',
+        facts: [
+          { label: 'Role', value: 'Traffic router' },
+          { label: 'Zone', value: 'us-west-2a' },
+          { label: 'Heartbeat drift', value: '4s lag' },
+          { label: 'Linked run', value: 'Checkout retry storm' },
+        ],
+        bullets: [
+          'Healthy agents still expose workload so operators can judge spare capacity.',
+          'The dashboard agent-health overview links here directly.',
+        ],
+        links: [
+          { href: '/live-runs/?run=run-stg-402', label: 'Open linked run' },
+          { href: '/', label: 'Return to dashboard' },
+        ],
+      },
+      'agent-prod-02': {
+        title: 'agent-prod-02',
+        status: 'Guarded',
+        summary:
+          'The prod-shadow runner is healthy, but its workload stays approval gated until the shadow replay expands.',
+        facts: [
+          { label: 'Role', value: 'Synthetic replay runner' },
+          { label: 'Zone', value: 'us-east-1c' },
+          { label: 'Heartbeat drift', value: '7s lag' },
+          { label: 'Linked run', value: 'Shadow DB saturation' },
+        ],
+        bullets: [
+          'This view makes the gating posture explicit instead of hiding it inside a generic card.',
+          'Dashboard links use this page as the agent detail target for approval-gated environments.',
+        ],
+        links: [
+          { href: '/live-runs/?run=run-prod-102', label: 'Open linked run' },
+          { href: '/experiments/?experiment=exp-shadow-db-saturation', label: 'View experiment' },
+        ],
+      },
+      'agent-prod-04': {
+        title: 'agent-prod-04',
+        status: 'Healthy',
+        summary:
+          'The shadow metrics collector is idle but important, because promotion decisions rely on a clean observer path before approval widens the replay.',
+        facts: [
+          { label: 'Role', value: 'Metrics collector' },
+          { label: 'Zone', value: 'us-east-1a' },
+          { label: 'Heartbeat drift', value: '5s lag' },
+          { label: 'Linked run', value: 'Shadow DB saturation' },
+        ],
+        bullets: [
+          'Healthy support agents still receive detail pages so dashboard links remain consistent.',
+          'The current shadow hold means collector capacity is visible even while the runner is gated.',
+        ],
+        links: [
+          { href: '/live-runs/?run=run-prod-102', label: 'Open linked run' },
+          { href: '/experiments/?experiment=exp-shadow-db-saturation', label: 'View experiment' },
+        ],
+      },
+      'agent-dev-01': {
+        title: 'agent-dev-01',
+        status: 'Healthy',
+        summary:
+          'The local sandbox agent is idle enough to keep UI rehearsal safe while still surfacing a realistic fleet card.',
+        facts: [
+          { label: 'Role', value: 'Local sandbox runner' },
+          { label: 'Zone', value: 'docker-desktop' },
+          { label: 'Heartbeat drift', value: '2s lag' },
+          { label: 'Linked run', value: 'Local queue backlog rehearsal' },
+        ],
+        bullets: [
+          'Local-dev uses this record to exercise the fleet detail route without risking guarded environments.',
+          'The dashboard can link here from the agent-health grid in one click.',
+        ],
+        links: [
+          { href: '/results/?result=result-dev-122', label: 'Open recent result' },
+          { href: '/', label: 'Return to dashboard' },
+        ],
+      },
+    },
+  },
+};
+
+const dashboardSnapshots = {
+  'local-dev': [
+    {
+      summary: {
+        recentRuns: 5,
+        recentNote: 'Recent rehearsals all recovered cleanly in sandbox scope.',
+        failedRuns: 0,
+        failedNote: 'No failed drills are blocking local UI work.',
+        healthyAgents: 4,
+        totalAgents: 4,
+        agentNote: 'All local agents are responding within 3 seconds.',
+      },
+      spotlight:
+        'Local Dev keeps a compact queue so shell changes can be rehearsed without waiting on guarded approvals.',
+      watchlist: [
+        { label: 'Queue backlog rehearsal is ready for another pass.', href: '/experiments/?experiment=exp-local-queue-backlog' },
+        { label: 'Local sandbox agent remains the cleanest reference fleet node.', href: '/agents/?agent=agent-dev-01' },
+      ],
+      activeRuns: [
+        {
+          id: 'run-dev-118',
+          title: 'Local queue backlog rehearsal',
+          experimentId: 'exp-local-queue-backlog',
+          service: 'local-queue',
+          status: 'Running',
+          progress: 68,
+          blastRadius: 'single worker process',
+          agents: '1 active agent',
+          startedAt: '4 min ago',
+          guardrail: 'Queue wait is still below the 6-minute stop line.',
+          leadAgentId: 'agent-dev-01',
+        },
+        {
+          id: 'run-dev-119',
+          title: 'Catalog CPU saturation',
+          experimentId: 'exp-catalog-cpu',
+          service: 'catalog-api',
+          status: 'Recovering',
+          progress: 87,
+          blastRadius: 'one pod in docker-desktop',
+          agents: '1 active agent',
+          startedAt: '9 min ago',
+          guardrail: 'Autoscaling fallback stayed inside rehearsal limits.',
+          leadAgentId: 'agent-dev-01',
+        },
+      ],
+      recentOutcomes: [
+        {
+          id: 'result-dev-122',
+          title: 'Local queue backlog rehearsal',
+          status: 'Recovered',
+          recovery: '47s',
+          finishedAt: '12 min ago',
+          impact: 'Queue wait briefly grew by 2m 08s',
+          experimentId: 'exp-local-queue-backlog',
+          summary: 'Consumers recovered without operator intervention.',
+        },
+        {
+          id: 'result-stg-398',
+          title: 'Catalog CPU saturation',
+          status: 'Recovered',
+          recovery: '2m 14s',
+          finishedAt: '37 min ago',
+          impact: 'Catalog p95 rose 19% during autoscaling',
+          experimentId: 'exp-catalog-cpu',
+          summary: 'Recovery stayed under the two-minute budget.',
+        },
+      ],
+      failedRuns: [],
+      agents: [
+        {
+          id: 'agent-dev-01',
+          name: 'agent-dev-01',
+          status: 'Healthy',
+          role: 'Local sandbox runner',
+          zone: 'docker-desktop',
+          heartbeat: '2s lag',
+          healthScore: 98,
+          load: '2 active drills',
+          linkedRunId: 'run-dev-118',
+          summary: 'UI rehearsal fixtures are stable and fast to reset.',
+        },
+        {
+          id: 'agent-dev-02',
+          name: 'agent-dev-02',
+          status: 'Healthy',
+          role: 'Trace collector',
+          zone: 'docker-desktop',
+          heartbeat: '1s lag',
+          healthScore: 97,
+          load: 'idle',
+          linkedRunId: 'run-dev-119',
+          summary: 'Collector backlog is empty after the last rehearsal.',
+        },
+      ],
+    },
+    {
+      summary: {
+        recentRuns: 6,
+        recentNote: 'A fresh backlog rehearsal joined the recent clean outcomes.',
+        failedRuns: 0,
+        failedNote: 'Sandbox is still clear of failed drills.',
+        healthyAgents: 4,
+        totalAgents: 4,
+        agentNote: 'Local fleet health stayed flat after the last refresh.',
+      },
+      spotlight:
+        'Local Dev advanced one queue drill into recovery, which makes the refresh timestamp useful even without backend wiring.',
+      watchlist: [
+        { label: 'Local queue drill is near completion and safe to rerun.', href: '/live-runs/?run=run-dev-118' },
+        { label: 'The local agent remains a stable reference node.', href: '/agents/?agent=agent-dev-01' },
+      ],
+      activeRuns: [
+        {
+          id: 'run-dev-118',
+          title: 'Local queue backlog rehearsal',
+          experimentId: 'exp-local-queue-backlog',
+          service: 'local-queue',
+          status: 'Recovering',
+          progress: 92,
+          blastRadius: 'single worker process',
+          agents: '1 active agent',
+          startedAt: '6 min ago',
+          guardrail: 'Drain time is falling back into the nominal range.',
+          leadAgentId: 'agent-dev-01',
+        },
+      ],
+      recentOutcomes: [
+        {
+          id: 'result-dev-122',
+          title: 'Local queue backlog rehearsal',
+          status: 'Recovered',
+          recovery: '47s',
+          finishedAt: '14 min ago',
+          impact: 'Queue wait briefly grew by 2m 08s',
+          experimentId: 'exp-local-queue-backlog',
+          summary: 'Consumers recovered without operator intervention.',
+        },
+        {
+          id: 'result-stg-398',
+          title: 'Catalog CPU saturation',
+          status: 'Recovered',
+          recovery: '2m 14s',
+          finishedAt: '39 min ago',
+          impact: 'Catalog p95 rose 19% during autoscaling',
+          experimentId: 'exp-catalog-cpu',
+          summary: 'Recovery stayed under the two-minute budget.',
+        },
+      ],
+      failedRuns: [],
+      agents: [
+        {
+          id: 'agent-dev-01',
+          name: 'agent-dev-01',
+          status: 'Healthy',
+          role: 'Local sandbox runner',
+          zone: 'docker-desktop',
+          heartbeat: '2s lag',
+          healthScore: 99,
+          load: '1 active drill',
+          linkedRunId: 'run-dev-118',
+          summary: 'The local runner is nearing idle again after the recovery stage.',
+        },
+        {
+          id: 'agent-dev-02',
+          name: 'agent-dev-02',
+          status: 'Healthy',
+          role: 'Trace collector',
+          zone: 'docker-desktop',
+          heartbeat: '1s lag',
+          healthScore: 97,
+          load: 'idle',
+          linkedRunId: 'run-dev-118',
+          summary: 'Collector backlog is still empty after the latest refresh.',
+        },
+      ],
+    },
+  ],
+  'staging-west': [
+    {
+      summary: {
+        recentRuns: 8,
+        recentNote: 'Six recovered cleanly; one stopped; one failed for review.',
+        failedRuns: 1,
+        failedNote: 'Inventory packet loss still needs rollback investigation.',
+        healthyAgents: 18,
+        totalAgents: 19,
+        agentNote: 'One degraded coordinator is lagging by 44 seconds.',
+      },
+      spotlight:
+        'Staging West is carrying the live operator load, so dashboard links need to land on concrete detail views, not placeholders.',
+      watchlist: [
+        { label: 'Prod Shadow approval is still pending before replay expansion.', href: '/experiments/?experiment=exp-shadow-db-saturation' },
+        { label: 'agent-stg-07 still shows heartbeat jitter after a node restart.', href: '/agents/?agent=agent-stg-07' },
+        { label: 'Inventory packet loss remains the single failed drill on deck.', href: '/results/?result=result-stg-392' },
+      ],
+      activeRuns: [
+        {
+          id: 'run-stg-401',
+          title: 'Checkout latency envelope',
+          experimentId: 'exp-checkout-latency',
+          service: 'checkout-api',
+          status: 'Running',
+          progress: 72,
+          blastRadius: '2 checkout pods and 1 payment worker',
+          agents: '4 active agents',
+          startedAt: '6 min ago',
+          guardrail: 'Checkout 5xx remains under the 2.5% guardrail.',
+          leadAgentId: 'agent-stg-07',
+        },
+        {
+          id: 'run-stg-402',
+          title: 'Checkout retry storm',
+          experimentId: 'exp-checkout-latency',
+          service: 'checkout-worker',
+          status: 'Holding',
+          progress: 38,
+          blastRadius: '1 worker shard in canary mode',
+          agents: '3 active agents',
+          startedAt: '14 min ago',
+          guardrail: 'Approval timer expires in 4 minutes.',
+          leadAgentId: 'agent-stg-03',
+        },
+        {
+          id: 'run-stg-403',
+          title: 'Inventory broker packet loss',
+          experimentId: 'exp-inventory-packet-loss',
+          service: 'inventory-broker',
+          status: 'Recovering',
+          progress: 91,
+          blastRadius: 'inventory.events partition leader',
+          agents: '2 active agents',
+          startedAt: '22 min ago',
+          guardrail: 'Rollback has been issued and is awaiting confirmation.',
+          leadAgentId: 'agent-stg-11',
+        },
+      ],
+      recentOutcomes: [
+        {
+          id: 'result-stg-398',
+          title: 'Catalog CPU saturation',
+          status: 'Recovered',
+          recovery: '2m 14s',
+          finishedAt: '11 min ago',
+          impact: 'Checkout p95 rose 19% during autoscaling',
+          experimentId: 'exp-catalog-cpu',
+          summary: 'Autoscaling recovered before downstream checkout degradation spread.',
+        },
+        {
+          id: 'result-prod-208',
+          title: 'Shadow DB saturation rehearsal',
+          status: 'Stopped',
+          recovery: '56s',
+          finishedAt: '27 min ago',
+          impact: 'Read latency approached the promotion threshold',
+          experimentId: 'exp-shadow-db-saturation',
+          summary: 'Operator stopped early before the guardrail turned into a breach.',
+        },
+        {
+          id: 'result-stg-392',
+          title: 'Inventory broker packet loss',
+          status: 'Failed',
+          recovery: 'Needs review',
+          finishedAt: '1h 04m ago',
+          impact: 'Consumer lag stayed above 180 seconds',
+          experimentId: 'exp-inventory-packet-loss',
+          summary: 'Rollback confirmation timed out after broker leader re-election.',
+        },
+      ],
+      failedRuns: [
+        {
+          id: 'result-stg-392',
+          title: 'Inventory broker packet loss',
+          cause: 'Rollback confirmation timed out after broker leader re-election.',
+          impact: 'Consumer lag remained elevated past the recovery budget.',
+          experimentId: 'exp-inventory-packet-loss',
+          agentId: 'agent-stg-07',
+        },
+      ],
+      agents: [
+        {
+          id: 'agent-stg-07',
+          name: 'agent-stg-07',
+          status: 'Degraded',
+          role: 'Fault coordinator',
+          zone: 'us-west-2b',
+          heartbeat: '44s lag',
+          healthScore: 71,
+          load: '2 active drills',
+          linkedRunId: 'run-stg-401',
+          summary: 'Recovered after node restart, but heartbeat jitter is still visible.',
+        },
+        {
+          id: 'agent-stg-03',
+          name: 'agent-stg-03',
+          status: 'Healthy',
+          role: 'Traffic router',
+          zone: 'us-west-2a',
+          heartbeat: '4s lag',
+          healthScore: 96,
+          load: '1 active drill',
+          linkedRunId: 'run-stg-402',
+          summary: 'Route splits remain steady while the run is on approval hold.',
+        },
+        {
+          id: 'agent-stg-11',
+          name: 'agent-stg-11',
+          status: 'Healthy',
+          role: 'Rollback verifier',
+          zone: 'us-west-2c',
+          heartbeat: '6s lag',
+          healthScore: 93,
+          load: '1 active drill',
+          linkedRunId: 'run-stg-403',
+          summary: 'Verifier still holds the inventory rollback lane.',
+        },
+      ],
+    },
+    {
+      summary: {
+        recentRuns: 9,
+        recentNote: 'A fresh stopped outcome joined the last-hour review set.',
+        failedRuns: 1,
+        failedNote: 'The inventory failure is still the only unresolved result.',
+        healthyAgents: 18,
+        totalAgents: 19,
+        agentNote: 'The degraded node improved slightly but is still outside target.',
+      },
+      spotlight:
+        'The refresh state advanced one live run and tightened the degraded heartbeat, so operators can see the dashboard reacting over time.',
+      watchlist: [
+        { label: 'Checkout retry storm cleared approval and resumed execution.', href: '/live-runs/?run=run-stg-402' },
+        { label: 'The degraded coordinator still needs a fleet-level follow-up.', href: '/agents/?agent=agent-stg-07' },
+        { label: 'Failed inventory rollback remains pinned for review.', href: '/results/?result=result-stg-392' },
+      ],
+      activeRuns: [
+        {
+          id: 'run-stg-401',
+          title: 'Checkout latency envelope',
+          experimentId: 'exp-checkout-latency',
+          service: 'checkout-api',
+          status: 'Running',
+          progress: 89,
+          blastRadius: '2 checkout pods and 1 payment worker',
+          agents: '4 active agents',
+          startedAt: '9 min ago',
+          guardrail: 'Error rate stayed below the stop threshold during the last cycle.',
+          leadAgentId: 'agent-stg-07',
+        },
+        {
+          id: 'run-stg-402',
+          title: 'Checkout retry storm',
+          experimentId: 'exp-checkout-latency',
+          service: 'checkout-worker',
+          status: 'Running',
+          progress: 52,
+          blastRadius: '1 worker shard in canary mode',
+          agents: '3 active agents',
+          startedAt: '16 min ago',
+          guardrail: 'Approval landed; canary is now exercising retry paths.',
+          leadAgentId: 'agent-stg-03',
+        },
+        {
+          id: 'run-stg-403',
+          title: 'Inventory broker packet loss',
+          experimentId: 'exp-inventory-packet-loss',
+          service: 'inventory-broker',
+          status: 'Recovering',
+          progress: 96,
+          blastRadius: 'inventory.events partition leader',
+          agents: '2 active agents',
+          startedAt: '24 min ago',
+          guardrail: 'Recovery confirmation is the final open step.',
+          leadAgentId: 'agent-stg-11',
+        },
+      ],
+      recentOutcomes: [
+        {
+          id: 'result-stg-398',
+          title: 'Catalog CPU saturation',
+          status: 'Recovered',
+          recovery: '2m 14s',
+          finishedAt: '13 min ago',
+          impact: 'Checkout p95 rose 19% during autoscaling',
+          experimentId: 'exp-catalog-cpu',
+          summary: 'Autoscaling recovered before downstream checkout degradation spread.',
+        },
+        {
+          id: 'result-prod-208',
+          title: 'Shadow DB saturation rehearsal',
+          status: 'Stopped',
+          recovery: '56s',
+          finishedAt: '29 min ago',
+          impact: 'Read latency approached the promotion threshold',
+          experimentId: 'exp-shadow-db-saturation',
+          summary: 'Operator stopped early before the guardrail turned into a breach.',
+        },
+        {
+          id: 'result-stg-392',
+          title: 'Inventory broker packet loss',
+          status: 'Failed',
+          recovery: 'Needs review',
+          finishedAt: '1h 06m ago',
+          impact: 'Consumer lag stayed above 180 seconds',
+          experimentId: 'exp-inventory-packet-loss',
+          summary: 'Rollback confirmation timed out after broker leader re-election.',
+        },
+      ],
+      failedRuns: [
+        {
+          id: 'result-stg-392',
+          title: 'Inventory broker packet loss',
+          cause: 'Rollback confirmation timed out after broker leader re-election.',
+          impact: 'Consumer lag remained elevated past the recovery budget.',
+          experimentId: 'exp-inventory-packet-loss',
+          agentId: 'agent-stg-07',
+        },
+      ],
+      agents: [
+        {
+          id: 'agent-stg-07',
+          name: 'agent-stg-07',
+          status: 'Degraded',
+          role: 'Fault coordinator',
+          zone: 'us-west-2b',
+          heartbeat: '31s lag',
+          healthScore: 78,
+          load: '2 active drills',
+          linkedRunId: 'run-stg-401',
+          summary: 'Heartbeat recovered somewhat, but the node is still outside the steady-state envelope.',
+        },
+        {
+          id: 'agent-stg-03',
+          name: 'agent-stg-03',
+          status: 'Healthy',
+          role: 'Traffic router',
+          zone: 'us-west-2a',
+          heartbeat: '4s lag',
+          healthScore: 97,
+          load: '1 active drill',
+          linkedRunId: 'run-stg-402',
+          summary: 'Route splits remain stable after the approval hold cleared.',
+        },
+        {
+          id: 'agent-stg-11',
+          name: 'agent-stg-11',
+          status: 'Healthy',
+          role: 'Rollback verifier',
+          zone: 'us-west-2c',
+          heartbeat: '5s lag',
+          healthScore: 94,
+          load: '1 active drill',
+          linkedRunId: 'run-stg-403',
+          summary: 'Verifier is almost done closing the last rollback step.',
+        },
+      ],
+    },
+  ],
+  'prod-shadow': [
+    {
+      summary: {
+        recentRuns: 3,
+        recentNote: 'Stopped shadow replays dominate the latest guarded outcomes.',
+        failedRuns: 0,
+        failedNote: 'No failed shadow drills are pinned right now.',
+        healthyAgents: 6,
+        totalAgents: 6,
+        agentNote: 'All shadow agents are healthy, but one is still approval gated.',
+      },
+      spotlight:
+        'Prod Shadow stays intentionally quiet, but the dashboard still needs to surface approval posture, recent stopped outcomes, and lead-agent links.',
+      watchlist: [
+        { label: 'Shadow DB saturation is still approval gated before wider replay.', href: '/experiments/?experiment=exp-shadow-db-saturation' },
+        { label: 'agent-prod-02 is the lead runner for the approval hold.', href: '/agents/?agent=agent-prod-02' },
+      ],
+      activeRuns: [
+        {
+          id: 'run-prod-102',
+          title: 'Shadow DB saturation',
+          experimentId: 'exp-shadow-db-saturation',
+          service: 'shadow-db',
+          status: 'Holding',
+          progress: 24,
+          blastRadius: 'synthetic replay only',
+          agents: '2 active agents',
+          startedAt: '7 min ago',
+          guardrail: 'Approval is still required before wider replay promotion.',
+          leadAgentId: 'agent-prod-02',
+        },
+      ],
+      recentOutcomes: [
+        {
+          id: 'result-prod-208',
+          title: 'Shadow DB saturation rehearsal',
+          status: 'Stopped',
+          recovery: '56s',
+          finishedAt: '41 min ago',
+          impact: 'Read latency approached the promotion threshold',
+          experimentId: 'exp-shadow-db-saturation',
+          summary: 'The shadow replay was stopped before a threshold breach.',
+        },
+      ],
+      failedRuns: [],
+      agents: [
+        {
+          id: 'agent-prod-02',
+          name: 'agent-prod-02',
+          status: 'Guarded',
+          role: 'Synthetic replay runner',
+          zone: 'us-east-1c',
+          heartbeat: '7s lag',
+          healthScore: 95,
+          load: '1 guarded drill',
+          linkedRunId: 'run-prod-102',
+          summary: 'Healthy node, but workload stays approval gated.',
+        },
+        {
+          id: 'agent-prod-04',
+          name: 'agent-prod-04',
+          status: 'Healthy',
+          role: 'Metrics collector',
+          zone: 'us-east-1a',
+          heartbeat: '5s lag',
+          healthScore: 97,
+          load: 'idle',
+          linkedRunId: 'run-prod-102',
+          summary: 'Collector is idle and ready if the shadow replay expands.',
+        },
+      ],
+    },
+    {
+      summary: {
+        recentRuns: 4,
+        recentNote: 'Approval state stayed intact while one stopped shadow result aged out.',
+        failedRuns: 0,
+        failedNote: 'Shadow remains clear of failed drills.',
+        healthyAgents: 6,
+        totalAgents: 6,
+        agentNote: 'Healthy fleet with one guarded runner still paused by approval.',
+      },
+      spotlight:
+        'Refresh only nudged the approval-hold progress here, but that is enough for an operator to see the dashboard timestamp and state controls working together.',
+      watchlist: [
+        { label: 'Approval hold still blocks wider shadow replay.', href: '/live-runs/?run=run-prod-102' },
+        { label: 'The guarded runner remains the key agent to inspect before promotion.', href: '/agents/?agent=agent-prod-02' },
+      ],
+      activeRuns: [
+        {
+          id: 'run-prod-102',
+          title: 'Shadow DB saturation',
+          experimentId: 'exp-shadow-db-saturation',
+          service: 'shadow-db',
+          status: 'Holding',
+          progress: 31,
+          blastRadius: 'synthetic replay only',
+          agents: '2 active agents',
+          startedAt: '10 min ago',
+          guardrail: 'Approval still blocks promotion to the wider lane.',
+          leadAgentId: 'agent-prod-02',
+        },
+      ],
+      recentOutcomes: [
+        {
+          id: 'result-prod-208',
+          title: 'Shadow DB saturation rehearsal',
+          status: 'Stopped',
+          recovery: '56s',
+          finishedAt: '43 min ago',
+          impact: 'Read latency approached the promotion threshold',
+          experimentId: 'exp-shadow-db-saturation',
+          summary: 'The shadow replay was stopped before a threshold breach.',
+        },
+      ],
+      failedRuns: [],
+      agents: [
+        {
+          id: 'agent-prod-02',
+          name: 'agent-prod-02',
+          status: 'Guarded',
+          role: 'Synthetic replay runner',
+          zone: 'us-east-1c',
+          heartbeat: '6s lag',
+          healthScore: 96,
+          load: '1 guarded drill',
+          linkedRunId: 'run-prod-102',
+          summary: 'Healthy node, workload still blocked by approval rather than fleet health.',
+        },
+        {
+          id: 'agent-prod-04',
+          name: 'agent-prod-04',
+          status: 'Healthy',
+          role: 'Metrics collector',
+          zone: 'us-east-1a',
+          heartbeat: '5s lag',
+          healthScore: 97,
+          load: 'idle',
+          linkedRunId: 'run-prod-102',
+          summary: 'Collector remains ready for a wider replay if approval lands.',
+        },
+      ],
+    },
+  ],
 };
 
 const previewState = {
@@ -187,7 +1267,14 @@ const previewState = {
   detail: 'empty',
 };
 
-const routeKey = document.body.dataset.route || 'dashboard';
+const dashboardState = {
+  autoRefreshEnabled: localStorage.getItem(AUTO_REFRESH_KEY) !== 'off',
+  refreshCount: 0,
+  lastRefreshAt: new Date(),
+  refreshing: false,
+};
+
+const routeKey = routes[document.body.dataset.route] ? document.body.dataset.route : 'dashboard';
 const sidebarNode = document.getElementById('sidebar');
 const contentNode = document.getElementById('content');
 
@@ -207,15 +1294,39 @@ document.addEventListener('click', (event) => {
     return;
   }
 
-  const button = target.closest('[data-surface][data-state]');
+  const stateButton = target.closest('[data-surface][data-state]');
 
-  if (!button) {
+  if (stateButton instanceof HTMLElement) {
+    previewState[stateButton.dataset.surface] = stateButton.dataset.state;
+    renderContent();
     return;
   }
 
-  previewState[button.dataset.surface] = button.dataset.state;
-  renderContent();
+  const actionButton = target.closest('[data-action]');
+
+  if (!(actionButton instanceof HTMLElement)) {
+    return;
+  }
+
+  if (actionButton.dataset.action === 'refresh-dashboard') {
+    triggerDashboardRefresh();
+    return;
+  }
+
+  if (actionButton.dataset.action === 'toggle-auto-refresh') {
+    dashboardState.autoRefreshEnabled = !dashboardState.autoRefreshEnabled;
+    localStorage.setItem(AUTO_REFRESH_KEY, dashboardState.autoRefreshEnabled ? 'on' : 'off');
+    renderContent();
+  }
 });
+
+if (routeKey === 'dashboard') {
+  window.setInterval(() => {
+    if (dashboardState.autoRefreshEnabled && !dashboardState.refreshing) {
+      triggerDashboardRefresh();
+    }
+  }, DASHBOARD_REFRESH_MS);
+}
 
 render();
 
@@ -231,11 +1342,11 @@ function renderSidebar() {
     <div class="sidebar-panel">
       <p class="sidebar-kicker">Project context</p>
       <h1>Chaos Platform</h1>
-      <p class="sidebar-copy">Distributed resilience lab for controlled failures, live telemetry, and run history.</p>
+      <p class="sidebar-copy">Distributed resilience lab for controlled failures, live telemetry, and historical review.</p>
     </div>
 
     <nav class="nav" aria-label="Primary navigation">
-      ${Object.keys(routes)
+      ${primaryRouteKeys
         .map((key) => {
           const route = routes[key];
           const activeClass = key === routeKey ? ' active' : '';
@@ -284,18 +1395,154 @@ function renderContent() {
   const environment = getActiveEnvironment();
   const route = routes[routeKey];
 
-  contentNode.innerHTML = `
-    <header class="topbar">
-      <div>
-        <p class="topbar-label">Global project and environment context</p>
-        <h2>Chaos Platform / ${environment.name}</h2>
-      </div>
-      <div class="context-strip" aria-label="Current environment details">
-        <span class="context-pill">cluster: ${environment.cluster}</span>
-        <span class="context-pill">region: ${environment.region}</span>
-        <span class="context-pill">posture: ${environment.posture}</span>
-      </div>
-    </header>
+  if (routeKey === 'dashboard') {
+    contentNode.innerHTML = renderDashboard(environment, route);
+    return;
+  }
+
+  contentNode.innerHTML = renderStandardRoute(environment, route);
+}
+
+function renderDashboard(environment, route) {
+  const snapshot = getDashboardSnapshot(environment.id);
+  const metrics = getDashboardMetrics(snapshot);
+
+  return `
+    ${renderTopbar(environment)}
+
+    <section class="page">
+      <header class="hero-card dashboard-hero">
+        <div class="hero-copy">
+          <p class="hero-kicker">${route.eyebrow}</p>
+          <h2>${route.title}</h2>
+          <p>${route.description}</p>
+          <p class="hero-emphasis">${snapshot.spotlight}</p>
+        </div>
+        <div class="hero-actions">
+          <div class="hero-context refresh-context">
+            <span>Last updated</span>
+            <strong>${formatTime(dashboardState.lastRefreshAt)}</strong>
+            <p class="hero-context-copy">
+              ${dashboardState.autoRefreshEnabled ? 'Auto refresh every 15s' : 'Manual refresh only'}
+            </p>
+          </div>
+          <div class="refresh-actions">
+            <button
+              type="button"
+              class="primary-button"
+              data-action="refresh-dashboard"
+              ${dashboardState.refreshing ? 'disabled' : ''}
+            >
+              ${dashboardState.refreshing ? 'Refreshing...' : 'Refresh now'}
+            </button>
+            <button type="button" class="ghost-button" data-action="toggle-auto-refresh">
+              ${dashboardState.autoRefreshEnabled ? 'Pause auto refresh' : 'Resume auto refresh'}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <section class="metric-grid dashboard-metrics" aria-label="Dashboard overview metrics">
+        ${metrics
+          .map(
+            (metric) => `
+              <a class="metric-card metric-link" href="${metric.href}">
+                <p class="metric-label">${metric.label}</p>
+                <h3>${metric.value}</h3>
+                <p class="metric-note">${metric.note}</p>
+              </a>
+            `,
+          )
+          .join('')}
+      </section>
+
+      <section class="section-shell">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Live execution</p>
+            <h2>Active runs</h2>
+          </div>
+          <p class="section-copy">Each card keeps the linked run, experiment, and lead-agent detail views one click away.</p>
+        </div>
+        <div class="run-grid">
+          ${snapshot.activeRuns.map(renderRunCard).join('')}
+        </div>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="surface-card dashboard-panel">
+          <div class="section-heading compact">
+            <div>
+              <p class="section-label">Recent outcomes</p>
+              <h3>Most recent completed drills</h3>
+            </div>
+          </div>
+          <div class="dashboard-list">
+            ${snapshot.recentOutcomes.map(renderOutcomeCard).join('')}
+          </div>
+        </article>
+
+        <article class="surface-card dashboard-panel">
+          <div class="section-heading compact">
+            <div>
+              <p class="section-label">Failed runs</p>
+              <h3>Runs that still need action</h3>
+            </div>
+          </div>
+          ${
+            snapshot.failedRuns.length
+              ? `<div class="dashboard-list">${snapshot.failedRuns.map(renderFailureCard).join('')}</div>`
+              : `
+                <div class="empty-panel">
+                  <p class="preview-title">No failed runs in the current window</p>
+                  <p class="preview-copy">${snapshot.summary.failedNote}</p>
+                </div>
+              `
+          }
+        </article>
+      </section>
+
+      <section class="section-shell">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Agent health overview</p>
+            <h2>Fleet health and watchpoints</h2>
+          </div>
+          <p class="section-copy">Health cards land on a dedicated fleet detail route instead of trapping the user in the dashboard.</p>
+        </div>
+
+        <div class="dashboard-grid">
+          <article class="surface-card dashboard-panel">
+            <div class="dashboard-list">
+              ${snapshot.agents.map(renderAgentCard).join('')}
+            </div>
+          </article>
+
+          <article class="surface-card dashboard-panel">
+            <div class="section-heading compact">
+              <div>
+                <p class="section-label">Operator watchlist</p>
+                <h3>What to keep in frame</h3>
+              </div>
+            </div>
+            <ul class="detail-list">
+              ${snapshot.watchlist
+                .map((item) => `<li><a class="resource-link" href="${item.href}">${item.label}</a></li>`)
+                .join('')}
+            </ul>
+          </article>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderStandardRoute(environment, route) {
+  const linkedDetail = getLinkedDetail(routeKey);
+  const detailTitle = linkedDetail ? linkedDetail.title : route.detailSurfaceTitle;
+
+  return `
+    ${renderTopbar(environment)}
 
     <section class="page">
       <header class="hero-card">
@@ -364,10 +1611,14 @@ function renderContent() {
         <div class="section-heading">
           <div>
             <p class="section-label">Reusable surfaces</p>
-            <h2>Loading, empty, and error states for both list and detail views</h2>
+            <h2>${linkedDetail ? 'Linked detail view from the dashboard' : 'Loading, empty, and error states for both list and detail views'}</h2>
           </div>
           <p class="section-copy">
-            Each route inherits the same state language so future API wiring can slot into a consistent frame.
+            ${
+              linkedDetail
+                ? 'Dashboard links now land on a concrete run, result, experiment, or agent detail surface.'
+                : 'Each route inherits the same state language so future API wiring can slot into a consistent frame.'
+            }
           </p>
         </div>
 
@@ -389,17 +1640,173 @@ function renderContent() {
             <div class="surface-header">
               <div>
                 <p class="surface-label">Detail surface</p>
-                <h3>${route.detailSurfaceTitle}</h3>
+                <h3>${detailTitle}</h3>
               </div>
-              ${renderStateSwitch('detail', previewState.detail)}
+              ${linkedDetail ? '<span class="context-pill context-pill-strong">Linked from dashboard</span>' : renderStateSwitch('detail', previewState.detail)}
             </div>
             <div class="surface-body">
-              ${renderSurfaceMarkup('detail', previewState.detail, route)}
+              ${linkedDetail ? renderLinkedDetail(linkedDetail) : renderSurfaceMarkup('detail', previewState.detail, route)}
             </div>
           </article>
         </div>
       </section>
     </section>
+  `;
+}
+
+function renderTopbar(environment) {
+  return `
+    <header class="topbar">
+      <div>
+        <p class="topbar-label">Global project and environment context</p>
+        <h2>Chaos Platform / ${environment.name}</h2>
+      </div>
+      <div class="context-strip" aria-label="Current environment details">
+        <span class="context-pill">cluster: ${environment.cluster}</span>
+        <span class="context-pill">region: ${environment.region}</span>
+        <span class="context-pill">posture: ${environment.posture}</span>
+      </div>
+    </header>
+  `;
+}
+
+function renderRunCard(run) {
+  return `
+    <article class="run-card">
+      <div class="run-card-header">
+        <div>
+          <p class="run-card-eyebrow">${run.service}</p>
+          <h3>${run.title}</h3>
+        </div>
+        ${renderStatusChip(run.status)}
+      </div>
+      <div class="meta-row">
+        <span>${run.startedAt}</span>
+        <span>${run.blastRadius}</span>
+        <span>${run.agents}</span>
+      </div>
+      <div class="progress-row">
+        <div class="progress-track">
+          <span style="width: ${run.progress}%;"></span>
+        </div>
+        <span>${run.progress}% complete</span>
+      </div>
+      <p class="run-note">${run.guardrail}</p>
+      <div class="link-row">
+        <a class="resource-link" href="/live-runs/?run=${run.id}">Open run</a>
+        <a class="resource-link" href="/experiments/?experiment=${run.experimentId}">View experiment</a>
+        <a class="resource-link" href="/agents/?agent=${run.leadAgentId}">Inspect agent</a>
+      </div>
+    </article>
+  `;
+}
+
+function renderOutcomeCard(result) {
+  return `
+    <article class="list-card">
+      <div class="list-card-header">
+        <div>
+          <p class="run-card-eyebrow">${result.finishedAt}</p>
+          <h3>${result.title}</h3>
+        </div>
+        ${renderStatusChip(result.status)}
+      </div>
+      <div class="meta-row">
+        <span>Recovery ${result.recovery}</span>
+        <span>${result.impact}</span>
+      </div>
+      <p class="run-note">${result.summary}</p>
+      <div class="link-row">
+        <a class="resource-link" href="/results/?result=${result.id}">Open result</a>
+        <a class="resource-link" href="/experiments/?experiment=${result.experimentId}">View experiment</a>
+      </div>
+    </article>
+  `;
+}
+
+function renderFailureCard(result) {
+  return `
+    <article class="list-card list-card-alert">
+      <div class="list-card-header">
+        <div>
+          <p class="run-card-eyebrow">Needs operator follow-up</p>
+          <h3>${result.title}</h3>
+        </div>
+        ${renderStatusChip('Failed')}
+      </div>
+      <div class="meta-row">
+        <span>${result.impact}</span>
+      </div>
+      <p class="run-note">${result.cause}</p>
+      <div class="link-row">
+        <a class="resource-link" href="/results/?result=${result.id}">Open failed result</a>
+        <a class="resource-link" href="/experiments/?experiment=${result.experimentId}">View experiment</a>
+        <a class="resource-link" href="/agents/?agent=${result.agentId}">Inspect agent</a>
+      </div>
+    </article>
+  `;
+}
+
+function renderAgentCard(agent) {
+  return `
+    <article class="agent-card">
+      <div class="list-card-header">
+        <div>
+          <p class="run-card-eyebrow">${agent.role}</p>
+          <h3>${agent.name}</h3>
+        </div>
+        ${renderStatusChip(agent.status)}
+      </div>
+      <div class="meta-row">
+        <span>${agent.zone}</span>
+        <span>${agent.heartbeat}</span>
+        <span>${agent.load}</span>
+      </div>
+      <div class="health-row">
+        <div class="health-track">
+          <span style="width: ${agent.healthScore}%;"></span>
+        </div>
+        <span>${agent.healthScore}% health</span>
+      </div>
+      <p class="run-note">${agent.summary}</p>
+      <div class="link-row">
+        <a class="resource-link" href="/agents/?agent=${agent.id}">Open agent detail</a>
+        <a class="resource-link" href="/live-runs/?run=${agent.linkedRunId}">Linked run</a>
+      </div>
+    </article>
+  `;
+}
+
+function renderLinkedDetail(record) {
+  return `
+    <article class="linked-detail">
+      <div class="linked-detail-header">
+        <div>
+          <p class="surface-label">Selected record</p>
+          <h3>${record.title}</h3>
+        </div>
+        ${renderStatusChip(record.status)}
+      </div>
+      <p class="linked-detail-copy">${record.summary}</p>
+      <div class="linked-fact-grid">
+        ${record.facts
+          .map(
+            (fact) => `
+              <div class="linked-fact">
+                <span>${fact.label}</span>
+                <strong>${fact.value}</strong>
+              </div>
+            `,
+          )
+          .join('')}
+      </div>
+      <ul class="detail-list">
+        ${record.bullets.map((item) => `<li>${item}</li>`).join('')}
+      </ul>
+      <div class="link-row">
+        ${record.links.map((link) => `<a class="resource-link" href="${link.href}">${link.label}</a>`).join('')}
+      </div>
+    </article>
   `;
 }
 
@@ -454,8 +1861,95 @@ function renderSurfaceMarkup(surface, state, route) {
   `;
 }
 
+function getDashboardMetrics(snapshot) {
+  return [
+    {
+      label: 'Active runs',
+      value: padMetric(snapshot.activeRuns.length),
+      note: `${snapshot.activeRuns.length} live drill${snapshot.activeRuns.length === 1 ? '' : 's'} in scope.`,
+      href: '/live-runs/',
+    },
+    {
+      label: 'Recent outcomes',
+      value: padMetric(snapshot.summary.recentRuns),
+      note: snapshot.summary.recentNote,
+      href: '/results/',
+    },
+    {
+      label: 'Failed runs',
+      value: padMetric(snapshot.summary.failedRuns),
+      note: snapshot.summary.failedNote,
+      href: snapshot.failedRuns[0] ? `/results/?result=${snapshot.failedRuns[0].id}` : '/results/',
+    },
+    {
+      label: 'Agent health',
+      value: `${snapshot.summary.healthyAgents}/${snapshot.summary.totalAgents}`,
+      note: snapshot.summary.agentNote,
+      href: snapshot.agents[0] ? `/agents/?agent=${snapshot.agents[0].id}` : '/agents/',
+    },
+  ];
+}
+
+function getDashboardSnapshot(environmentId) {
+  const snapshots = dashboardSnapshots[environmentId] || dashboardSnapshots[environments[0].id];
+  const index = dashboardState.refreshCount % snapshots.length;
+  return snapshots[index];
+}
+
+function getLinkedDetail(currentRouteKey) {
+  const detailConfig = linkedDetails[currentRouteKey];
+
+  if (!detailConfig) {
+    return null;
+  }
+
+  const detailId = new URLSearchParams(window.location.search).get(detailConfig.param);
+
+  if (!detailId) {
+    return null;
+  }
+
+  return detailConfig.records[detailId] || null;
+}
+
+function triggerDashboardRefresh() {
+  if (dashboardState.refreshing) {
+    return;
+  }
+
+  dashboardState.refreshing = true;
+  renderContent();
+
+  window.setTimeout(() => {
+    dashboardState.refreshCount += 1;
+    dashboardState.lastRefreshAt = new Date();
+    dashboardState.refreshing = false;
+    renderContent();
+  }, 350);
+}
+
+function renderStatusChip(label) {
+  return `<span class="status-chip ${toToken(label)}">${label}</span>`;
+}
+
 function getActiveEnvironment() {
   const savedEnvironmentId = localStorage.getItem(STORAGE_KEY) || environments[1].id;
 
   return environments.find((environment) => environment.id === savedEnvironmentId) || environments[0];
+}
+
+function formatTime(date) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(date);
+}
+
+function padMetric(value) {
+  return String(value).padStart(2, '0');
+}
+
+function toToken(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
