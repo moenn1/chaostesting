@@ -33,6 +33,18 @@ Route permissions are enforced consistently across the control plane:
 
 Machine registration endpoints `/agents/register` and `/agents/heartbeat` stay open for now so the current runtime continues working. They are intentionally left for the signed agent-auth hardening tracked in `MYG-44`.
 
+## Run stop semantics
+
+Run authorization now snapshots the healthy agents that match the run environment and requested fault capability. Those assignments stay attached to the run record so stop operations can update both the run and its targeted agent set together.
+
+`POST /safety/runs/{runId}/stop` now enforces an explicit state machine:
+
+- only `ACTIVE` runs can be stopped
+- successful stops return terminal `ROLLED_BACK` status plus `endedAt`, `rollbackVerifiedAt`, `assignmentCount`, `activeAssignmentCount`, and `stoppedAssignmentCount`
+- repeated stop requests against `STOP_REQUESTED`, `ROLLED_BACK`, `STOPPED`, or `COMPLETED` runs return `409 Conflict` with a structured validation body describing the current status
+
+Kill-switch responses expose both `rolledBackRunCount` and `stopRequestsIssued` so dashboards can distinguish terminal cleanup from in-flight stop activity, while still leaving `stoppedRunCount` available for compatibility with any future direct-stop flows.
+
 ## Local development
 
 Prerequisites:

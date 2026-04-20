@@ -15,6 +15,7 @@ public record ChaosRun(
         UUID approvalId,
         ChaosRunStatus status,
         Instant createdAt,
+        Instant endedAt,
         Instant rollbackScheduledAt,
         Instant rollbackVerifiedAt,
         Instant startedAt,

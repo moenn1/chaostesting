@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS chaos_runs (
     approval_id UUID REFERENCES dispatch_approvals(id),
     status VARCHAR(64) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    ended_at TIMESTAMP WITH TIME ZONE,
     rollback_scheduled_at TIMESTAMP WITH TIME ZONE NOT NULL,
     rollback_verified_at TIMESTAMP WITH TIME ZONE,
     started_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -54,6 +55,25 @@ CREATE INDEX IF NOT EXISTS idx_chaos_runs_status_created_at ON chaos_runs(status
 CREATE INDEX IF NOT EXISTS idx_chaos_runs_environment_created_at ON chaos_runs(target_environment, created_at);
 CREATE INDEX IF NOT EXISTS idx_chaos_runs_experiment_status_started_at
     ON chaos_runs(experiment_id, status, started_at);
+
+CREATE TABLE IF NOT EXISTS run_assignments (
+    id UUID PRIMARY KEY,
+    run_id UUID NOT NULL REFERENCES chaos_runs(id) ON DELETE CASCADE,
+    agent_id UUID NOT NULL REFERENCES agents(id),
+    agent_name VARCHAR(255) NOT NULL,
+    hostname VARCHAR(255) NOT NULL,
+    environment VARCHAR(255) NOT NULL,
+    region VARCHAR(255) NOT NULL,
+    status VARCHAR(64) NOT NULL,
+    assigned_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    stop_requested_at TIMESTAMP WITH TIME ZONE,
+    ended_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_assignments_run_status
+    ON run_assignments(run_id, status, assigned_at);
+CREATE INDEX IF NOT EXISTS idx_run_assignments_agent_status
+    ON run_assignments(agent_id, status, assigned_at);
 
 CREATE TABLE IF NOT EXISTS kill_switch_state (
     id BIGINT PRIMARY KEY,

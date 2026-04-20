@@ -7,11 +7,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myg.controlplane.agents.service.AgentRegistryService;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,6 +28,8 @@ import org.springframework.scheduling.TaskScheduler;
 class ChaosRunServiceTest {
 
     private final ChaosRunJpaRepository chaosRunJpaRepository = Mockito.mock(ChaosRunJpaRepository.class);
+    private final RunAssignmentJpaRepository runAssignmentJpaRepository = Mockito.mock(RunAssignmentJpaRepository.class);
+    private final AgentRegistryService agentRegistryService = Mockito.mock(AgentRegistryService.class);
     private final LatencyTelemetrySnapshotJpaRepository latencyTelemetrySnapshotJpaRepository =
             Mockito.mock(LatencyTelemetrySnapshotJpaRepository.class);
     private final AuditLogService auditLogService = Mockito.mock(AuditLogService.class);
@@ -52,6 +56,8 @@ class ChaosRunServiceTest {
         when(chaosRunJpaRepository.findById(any(UUID.class))).thenAnswer(invocation ->
                 Optional.ofNullable(storedRun.get()));
         when(chaosRunJpaRepository.existsById(any(UUID.class))).thenAnswer(invocation -> storedRun.get() != null);
+        when(runAssignmentJpaRepository.findAllByRunId(any(UUID.class))).thenReturn(List.of());
+        when(agentRegistryService.findAll(any(), any(), any(), any())).thenReturn(List.of());
         when(taskScheduler.scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class)))
                 .thenReturn(mock(ScheduledFuture.class));
         when(taskScheduler.schedule(any(Runnable.class), any(Instant.class)))
@@ -60,6 +66,8 @@ class ChaosRunServiceTest {
         chaosRunService = new ChaosRunService(
                 clock,
                 chaosRunJpaRepository,
+                runAssignmentJpaRepository,
+                agentRegistryService,
                 latencyTelemetrySnapshotJpaRepository,
                 auditLogService,
                 runLifecycleEventService,

@@ -46,6 +46,8 @@ public class ChaosRunEntity {
     @Column(nullable = false)
     private Instant createdAt;
 
+    private Instant endedAt;
+
     @Column(nullable = false)
     private Instant rollbackScheduledAt;
 
@@ -78,6 +80,7 @@ public class ChaosRunEntity {
                           UUID approvalId,
                           ChaosRunStatus status,
                           Instant createdAt,
+                          Instant endedAt,
                           Instant rollbackScheduledAt,
                           Instant rollbackVerifiedAt,
                           Instant startedAt,
@@ -96,6 +99,7 @@ public class ChaosRunEntity {
         this.approvalId = approvalId;
         this.status = status;
         this.createdAt = createdAt;
+        this.endedAt = endedAt;
         this.rollbackScheduledAt = rollbackScheduledAt;
         this.rollbackVerifiedAt = rollbackVerifiedAt;
         this.startedAt = startedAt;
@@ -103,6 +107,10 @@ public class ChaosRunEntity {
         this.stopCommandIssuedAt = stopCommandIssuedAt;
         this.stopCommandIssuedBy = stopCommandIssuedBy;
         this.stopCommandReason = stopCommandReason;
+    }
+
+    public boolean canBeStopped() {
+        return status.canBeStopped();
     }
 
     public void markStopRequested(String operator, String reason, Instant now) {
@@ -115,8 +123,17 @@ public class ChaosRunEntity {
         stopCommandReason = reason;
     }
 
+    public void markStopped(String operator, String reason, Instant now) {
+        status = ChaosRunStatus.STOPPED;
+        endedAt = now;
+        stopCommandIssuedAt = now;
+        stopCommandIssuedBy = operator;
+        stopCommandReason = reason;
+    }
+
     public void markRolledBack(Instant now) {
         status = ChaosRunStatus.ROLLED_BACK;
+        endedAt = now;
         rollbackVerifiedAt = now;
     }
 
@@ -133,6 +150,7 @@ public class ChaosRunEntity {
                 approvalId,
                 status,
                 createdAt,
+                endedAt,
                 rollbackScheduledAt,
                 rollbackVerifiedAt,
                 startedAt,
@@ -156,6 +174,7 @@ public class ChaosRunEntity {
                 approvalId,
                 status,
                 createdAt,
+                endedAt,
                 rollbackScheduledAt,
                 rollbackVerifiedAt,
                 startedAt,

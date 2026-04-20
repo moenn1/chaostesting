@@ -15,15 +15,23 @@ public record ChaosRunResponse(
         Integer trafficPercentage,
         UUID approvalId,
         Instant createdAt,
+        Instant endedAt,
         Instant rollbackScheduledAt,
         Instant rollbackVerifiedAt,
         Instant startedAt,
         RunTargetSnapshot targetSnapshot,
         Instant stopCommandIssuedAt,
         String stopCommandIssuedBy,
-        String stopCommandReason
+        String stopCommandReason,
+        long assignmentCount,
+        long activeAssignmentCount,
+        long stoppedAssignmentCount
 ) {
     public static ChaosRunResponse from(ChaosRun run) {
+        return from(run, inferAssignmentSummary(run));
+    }
+
+    public static ChaosRunResponse from(ChaosRun run, RunAssignmentSummary assignmentSummary) {
         return new ChaosRunResponse(
                 run.id(),
                 run.experimentId(),
@@ -36,13 +44,29 @@ public record ChaosRunResponse(
                 run.trafficPercentage(),
                 run.approvalId(),
                 run.createdAt(),
+                run.endedAt(),
                 run.rollbackScheduledAt(),
                 run.rollbackVerifiedAt(),
                 run.startedAt(),
                 run.targetSnapshot(),
                 run.stopCommandIssuedAt(),
                 run.stopCommandIssuedBy(),
-                run.stopCommandReason()
+                run.stopCommandReason(),
+                assignmentSummary.assignmentCount(),
+                assignmentSummary.activeAssignmentCount(),
+                assignmentSummary.stoppedAssignmentCount()
         );
+    }
+
+    private static RunAssignmentSummary inferAssignmentSummary(ChaosRun run) {
+        int assignmentCount = run.targetSnapshot() == null ? 0 : run.targetSnapshot().assignedAgents().size();
+        if (assignmentCount == 0) {
+            return RunAssignmentSummary.empty();
+        }
+
+        return switch (run.status()) {
+            case ACTIVE, STOP_REQUESTED -> new RunAssignmentSummary(assignmentCount, assignmentCount, 0);
+            case ROLLED_BACK, STOPPED, COMPLETED -> new RunAssignmentSummary(assignmentCount, 0, assignmentCount);
+        };
     }
 }

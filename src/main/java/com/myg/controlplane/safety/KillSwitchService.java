@@ -103,6 +103,7 @@ public class KillSwitchService {
                 chaosRunJpaRepository.countByStatus(ChaosRunStatus.ACTIVE),
                 chaosRunJpaRepository.countByStatus(ChaosRunStatus.STOP_REQUESTED),
                 chaosRunJpaRepository.countByStatus(ChaosRunStatus.ROLLED_BACK),
+                chaosRunJpaRepository.countByStatus(ChaosRunStatus.STOPPED),
                 stopRequestsIssued
         );
     }

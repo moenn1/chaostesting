@@ -91,6 +91,16 @@ Or, if the headers are absent, the configured default local user.
 
 Operator, approver, and admin actions no longer trust request-body actor fields. Audit entries now derive the actor from the authenticated principal so callers cannot spoof `requestedBy`, `approvedBy`, or `operator`.
 
+## Run stop contract
+
+Operator stop requests now enforce the run state machine directly on the control plane:
+
+- `POST /safety/runs/{runId}/stop` succeeds only for `ACTIVE` runs
+- the success payload returns terminal `ROLLED_BACK` state, `endedAt`, `rollbackVerifiedAt`, and assignment counters
+- invalid repeat stops return `409 Conflict` with a JSON body containing `code`, `message`, `runId`, `currentStatus`, and `stoppableStatuses`
+
+At dispatch time the control plane snapshots healthy matching agents into persisted run assignments, and stop actions update those assignments to `STOPPED` while the parent run completes rollback to `ROLLED_BACK`.
+
 ## Known follow-up
 
 - `POST /agents/register`

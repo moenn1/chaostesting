@@ -1,5 +1,6 @@
 package com.myg.controlplane.safety;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -12,6 +13,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.Arrays;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,6 +60,12 @@ class RunDispatchControllerTest {
 
     @Autowired
     private MutableClock clock;
+
+    @Autowired
+    private ChaosRunJpaRepository chaosRunJpaRepository;
+
+    @Autowired
+    private RunAssignmentJpaRepository runAssignmentJpaRepository;
 
     @Test
     void validatesNonProductionDispatchesWithoutApproval() throws Exception {
@@ -220,6 +229,8 @@ class RunDispatchControllerTest {
 
     @Test
     void enablingKillSwitchStopsActiveRunsAndWritesAuditMetadata() throws Exception {
+        registerAgent("staging-agent-01", "staging", "us-phoenix-1", "latency");
+
         MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -253,6 +264,7 @@ class RunDispatchControllerTest {
                 .andExpect(jsonPath("$.activeRunCount").value(0))
                 .andExpect(jsonPath("$.stopRequestedRunCount").value(0))
                 .andExpect(jsonPath("$.rolledBackRunCount").value(1))
+                .andExpect(jsonPath("$.stoppedRunCount").value(0))
                 .andExpect(jsonPath("$.stopRequestsIssued").value(1));
 
         mockMvc.perform(as(get("/safety/runs").param("status", "rolled_back"), "viewer", "VIEWER"))
@@ -261,16 +273,32 @@ class RunDispatchControllerTest {
                 .andExpect(jsonPath("$[0].id").value(runId))
                 .andExpect(jsonPath("$[0].status").value("ROLLED_BACK"))
                 .andExpect(jsonPath("$[0].stopCommandIssuedBy").value("ops-oncall"))
-                .andExpect(jsonPath("$[0].stopCommandReason").value("customer-impact containment"));
+                .andExpect(jsonPath("$[0].stopCommandReason").value("customer-impact containment"))
+                .andExpect(jsonPath("$[0].assignmentCount").value(1))
+                .andExpect(jsonPath("$[0].activeAssignmentCount").value(0))
+                .andExpect(jsonPath("$[0].stoppedAssignmentCount").value(1));
 
-        mockMvc.perform(as(get("/safety/audit-records"), "viewer", "VIEWER"))
+        mockMvc.perform(as(get("/safety/audit-records")
+                        .param("resourceType", "run")
+                        .param("resourceId", runId), "viewer", "VIEWER"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(4)))
+                .andExpect(jsonPath("$", hasSize(3)))
                 .andExpect(jsonPath("$[0].action").value("RUN_ROLLBACK_VERIFIED"))
                 .andExpect(jsonPath("$[0].resourceId").value(runId))
-                .andExpect(jsonPath("$[?(@.action=='RUN_STOP_REQUESTED' && @.resourceId=='%s')]".formatted(runId)).exists())
-                .andExpect(jsonPath("$[?(@.action=='KILL_SWITCH_ENABLED' && @.resourceId=='global')]").exists())
-                .andExpect(jsonPath("$[?(@.action=='RUN_STARTED' && @.resourceId=='%s')]".formatted(runId)).exists());
+                .andExpect(jsonPath("$[0].actor").value("ops-oncall"))
+                .andExpect(jsonPath("$[0].metadata.finalStatus").value("ROLLED_BACK"))
+                .andExpect(jsonPath("$[1].action").value("RUN_STOP_REQUESTED"))
+                .andExpect(jsonPath("$[1].actor").value("ops-oncall"))
+                .andExpect(jsonPath("$[2].action").value("RUN_STARTED"))
+                .andExpect(jsonPath("$[2].actor").value("experiment-operator"));
+
+        mockMvc.perform(as(get("/safety/audit-records")
+                        .param("action", "kill_switch_enabled")
+                        .param("resourceType", "kill_switch"), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].actor").value("ops-oncall"))
+                .andExpect(jsonPath("$[0].summary").value("customer-impact containment"));
     }
 
     @Test
@@ -371,6 +399,8 @@ class RunDispatchControllerTest {
 
     @Test
     void operatorCanStopRunsAndAuditUsesAuthenticatedActor() throws Exception {
+        registerAgent("staging-agent-02", "staging", "us-phoenix-1", "latency");
+
         MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -400,7 +430,15 @@ class RunDispatchControllerTest {
                 .andExpect(jsonPath("$.id").value(runId))
                 .andExpect(jsonPath("$.status").value("ROLLED_BACK"))
                 .andExpect(jsonPath("$.stopCommandIssuedBy").value("experiment-operator"))
-                .andExpect(jsonPath("$.stopCommandReason").value("manual abort"));
+                .andExpect(jsonPath("$.stopCommandReason").value("manual abort"))
+                .andExpect(jsonPath("$.assignmentCount").value(1))
+                .andExpect(jsonPath("$.activeAssignmentCount").value(0))
+                .andExpect(jsonPath("$.stoppedAssignmentCount").value(1));
+
+        RunAssignment persistedAssignment = runAssignmentJpaRepository.findAllByRunId(UUID.fromString(runId)).get(0).toDomain();
+        assertThat(persistedAssignment.status()).isEqualTo(RunAssignmentStatus.STOPPED);
+        assertThat(persistedAssignment.stopRequestedAt()).isEqualTo(Instant.parse("2026-04-20T16:00:00Z"));
+        assertThat(persistedAssignment.endedAt()).isEqualTo(Instant.parse("2026-04-20T16:00:00Z"));
 
         mockMvc.perform(as(get("/audit/events")
                         .param("action", "run_stop_requested")
@@ -409,7 +447,91 @@ class RunDispatchControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].actor").value("experiment-operator"))
-                .andExpect(jsonPath("$[0].summary").value("Stop requested for checkout-service"));
+                .andExpect(jsonPath("$[0].summary").value("Stop requested for checkout-service"))
+                .andExpect(jsonPath("$[0].metadata.assignmentCount").value(1))
+                .andExpect(jsonPath("$[0].metadata.stoppedAssignmentCount").value(1));
+    }
+
+    @Test
+    void rejectingSecondStopReturnsClearValidationResponse() throws Exception {
+        MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "checkout-service",
+                                  "faultType": "latency",
+                                  "requestedDurationSeconds": 120,
+                                  "latencyMilliseconds": 350,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "experiment-operator"
+                                }
+                                """))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        String runId = readField(dispatch.getResponse().getContentAsString(), "dispatchId");
+
+        mockMvc.perform(as(post("/safety/runs/{runId}/stop", runId), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "manual abort"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(as(post("/safety/runs/{runId}/stop", runId), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "manual abort"
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RUN_ALREADY_ROLLED_BACK"))
+                .andExpect(jsonPath("$.message").value("Run has already been rolled back."))
+                .andExpect(jsonPath("$.runId").value(runId))
+                .andExpect(jsonPath("$.currentStatus").value("ROLLED_BACK"))
+                .andExpect(jsonPath("$.stoppableStatuses[0]").value("ACTIVE"));
+    }
+
+    @Test
+    void completedRunsCannotBeStoppedAgain() throws Exception {
+        UUID runId = UUID.randomUUID();
+        chaosRunJpaRepository.save(new ChaosRunEntity(
+                runId,
+                null,
+                "staging",
+                "checkout-service",
+                "latency",
+                120,
+                350,
+                30,
+                null,
+                ChaosRunStatus.COMPLETED,
+                Instant.parse("2026-04-20T15:50:00Z"),
+                Instant.parse("2026-04-20T15:55:00Z"),
+                Instant.parse("2026-04-20T15:52:00Z"),
+                Instant.parse("2026-04-20T15:55:00Z"),
+                Instant.parse("2026-04-20T15:50:00Z"),
+                null,
+                null,
+                null,
+                null
+        ));
+
+        mockMvc.perform(as(post("/safety/runs/{runId}/stop", runId), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "manual abort"
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RUN_ALREADY_COMPLETED"))
+                .andExpect(jsonPath("$.message").value("Completed runs cannot be stopped again."))
+                .andExpect(jsonPath("$.currentStatus").value("COMPLETED"));
     }
 
     @Test
@@ -518,6 +640,25 @@ class RunDispatchControllerTest {
         return builder
                 .header(DEV_USER_HEADER, username)
                 .header(DEV_ROLES_HEADER, roles);
+    }
+
+    private void registerAgent(String name, String environment, String region, String... capabilities) throws Exception {
+        String capabilitiesJson = Arrays.stream(capabilities)
+                .map(capability -> "\"" + capability + "\"")
+                .collect(java.util.stream.Collectors.joining(","));
+
+        mockMvc.perform(post("/agents/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "%s",
+                                  "hostname": "%s.internal",
+                                  "environment": "%s",
+                                  "region": "%s",
+                                  "supportedFaultCapabilities": [%s]
+                                }
+                                """.formatted(name, name, environment, region, capabilitiesJson)))
+                .andExpect(status().isCreated());
     }
 
     static final class MutableClock extends Clock {
