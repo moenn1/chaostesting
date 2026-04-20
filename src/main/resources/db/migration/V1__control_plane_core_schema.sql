@@ -17,6 +17,32 @@ CREATE TABLE IF NOT EXISTS agent_capabilities (
 CREATE INDEX IF NOT EXISTS idx_agents_environment_last_heartbeat ON agents(environment, last_heartbeat_at);
 CREATE INDEX IF NOT EXISTS idx_agents_region_last_heartbeat ON agents(region, last_heartbeat_at);
 
+CREATE TABLE IF NOT EXISTS agent_commands (
+    id UUID PRIMARY KEY,
+    agent_id UUID NOT NULL REFERENCES agents(id),
+    fault_type VARCHAR(255) NOT NULL,
+    duration_seconds BIGINT NOT NULL,
+    target_scope VARCHAR(255) NOT NULL,
+    status VARCHAR(64) NOT NULL,
+    delivery_count INTEGER NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    started_at TIMESTAMP WITH TIME ZONE,
+    finished_at TIMESTAMP WITH TIME ZONE,
+    last_delivered_at TIMESTAMP WITH TIME ZONE,
+    latest_message VARCHAR(2048)
+);
+
+CREATE TABLE IF NOT EXISTS agent_command_parameters (
+    command_id UUID NOT NULL REFERENCES agent_commands(id) ON DELETE CASCADE,
+    parameter_name VARCHAR(255) NOT NULL,
+    parameter_value VARCHAR(255) NOT NULL,
+    PRIMARY KEY (command_id, parameter_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_commands_agent_status_created_at
+    ON agent_commands(agent_id, status, created_at);
+
 CREATE TABLE IF NOT EXISTS dispatch_approvals (
     id UUID PRIMARY KEY,
     target_environment VARCHAR(255) NOT NULL,

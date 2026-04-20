@@ -28,6 +28,8 @@ class CoreSchemaMigrationTest {
 
         try (Connection connection = DriverManager.getConnection(url, "sa", "")) {
             assertThat(tableExists(connection, "agents")).isTrue();
+            assertThat(tableExists(connection, "agent_commands")).isTrue();
+            assertThat(tableExists(connection, "agent_command_parameters")).isTrue();
             assertThat(tableExists(connection, "chaos_runs")).isTrue();
             assertThat(tableExists(connection, "run_assignments")).isTrue();
             assertThat(tableExists(connection, "experiment_definitions")).isTrue();
@@ -39,6 +41,10 @@ class CoreSchemaMigrationTest {
             assertThat(tableExists(connection, "telemetry_snapshots")).isTrue();
             assertThat(tableExists(connection, "audit_events")).isTrue();
 
+            assertThat(importedKeys(connection, "agent_commands"))
+                    .contains("agents");
+            assertThat(importedKeys(connection, "agent_command_parameters"))
+                    .contains("agent_commands");
             assertThat(importedKeys(connection, "experiment_runs"))
                     .contains("experiments", "agents", "dispatch_approvals");
             assertThat(importedKeys(connection, "run_assignments"))
@@ -49,6 +55,9 @@ class CoreSchemaMigrationTest {
                     .contains("experiment_runs", "agents");
             assertThat(importedKeys(connection, "audit_events"))
                     .contains("experiments", "experiment_runs", "agents", "fault_injection_actions");
+
+            Set<String> agentCommandIndexes = indexNames(connection, "agent_commands");
+            assertThat(agentCommandIndexes).contains("idx_agent_commands_agent_status_created_at");
 
             Set<String> experimentRunIndexes = indexNames(connection, "experiment_runs");
             assertThat(experimentRunIndexes).contains("idx_experiment_runs_experiment_created_at");

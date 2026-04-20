@@ -1,5 +1,6 @@
 package com.myg.controlplane;
 
+import com.myg.controlplane.agents.runtime.AgentRuntimeProperties;
 import com.myg.controlplane.agents.service.AgentRegistryProperties;
 import com.myg.controlplane.security.ChaosAuthProperties;
 import com.myg.controlplane.safety.LatencyInjectionProperties;
@@ -10,11 +11,14 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 @SpringBootApplication
+@EnableScheduling
 @EnableConfigurationProperties({
         AgentRegistryProperties.class,
+        AgentRuntimeProperties.class,
         ChaosAuthProperties.class,
         SafetyGuardrailsProperties.class,
         LatencyInjectionProperties.class
