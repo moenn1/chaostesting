@@ -1,0 +1,27 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${LOCAL_POSTGRES_HOST:localhost}:${LOCAL_POSTGRES_PORT:5432}/chaos_control_plane
+    username: ${LOCAL_POSTGRES_USER:chaos}
+    password: ${LOCAL_POSTGRES_PASSWORD:chaos}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+  data:
+    redis:
+      host: ${LOCAL_REDIS_HOST:localhost}
+      port: ${LOCAL_REDIS_PORT:6379}
+  rabbitmq:
+    host: ${LOCAL_RABBITMQ_HOST:localhost}
+    port: ${LOCAL_RABBITMQ_PORT:5672}
+    username: ${LOCAL_RABBITMQ_USER:chaos}
+    password: ${LOCAL_RABBITMQ_PASSWORD:chaos}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+agent-registry:
+  stale-after: 12h
