@@ -1,5 +1,6 @@
 package com.myg.controlplane.safety;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -17,15 +18,18 @@ public class KillSwitchService {
     private final KillSwitchStateJpaRepository killSwitchStateJpaRepository;
     private final ChaosRunJpaRepository chaosRunJpaRepository;
     private final AuditLogService auditLogService;
+    private final ObjectMapper objectMapper;
 
     public KillSwitchService(Clock clock,
                              KillSwitchStateJpaRepository killSwitchStateJpaRepository,
                              ChaosRunJpaRepository chaosRunJpaRepository,
-                             AuditLogService auditLogService) {
+                             AuditLogService auditLogService,
+                             ObjectMapper objectMapper) {
         this.clock = clock;
         this.killSwitchStateJpaRepository = killSwitchStateJpaRepository;
         this.chaosRunJpaRepository = chaosRunJpaRepository;
         this.auditLogService = auditLogService;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional(readOnly = true)
@@ -61,7 +65,7 @@ public class KillSwitchService {
                 now
         );
         for (int index = 0; index < activeRuns.size(); index++) {
-            ChaosRun run = activeRuns.get(index).toDomain();
+            ChaosRun run = activeRuns.get(index).toDomain(objectMapper);
             auditLogService.record(
                     SafetyAuditEventType.RUN_STOP_REQUESTED,
                     AuditResourceType.RUN,

@@ -1,9 +1,15 @@
 package com.myg.controlplane.experiments;
 
+import com.myg.controlplane.safety.ChaosRunResponse;
+import com.myg.controlplane.safety.DispatchValidationResponse;
+import com.myg.controlplane.safety.RunDispatchRejectedException;
+import com.myg.controlplane.security.CurrentSecurityActor;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,9 +26,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class ExperimentController {
 
     private final ExperimentService experimentService;
+    private final ExperimentRunService experimentRunService;
+    private final CurrentSecurityActor currentSecurityActor;
 
-    public ExperimentController(ExperimentService experimentService) {
+    public ExperimentController(ExperimentService experimentService,
+                                ExperimentRunService experimentRunService,
+                                CurrentSecurityActor currentSecurityActor) {
         this.experimentService = experimentService;
+        this.experimentRunService = experimentRunService;
+        this.currentSecurityActor = currentSecurityActor;
     }
 
     @PostMapping
@@ -60,6 +72,21 @@ public class ExperimentController {
         experimentService.delete(experimentId);
     }
 
+    @PostMapping("/{experimentId}/runs")
+    @PreAuthorize("hasAuthority('chaos.operate')")
+    public ResponseEntity<ChaosRunResponse> startManualRun(@PathVariable UUID experimentId,
+                                                           @RequestBody(required = false) ManualRunStartRequest request,
+                                                           Authentication authentication) {
+        ManualRunStartRequest startRequest = request == null ? new ManualRunStartRequest(null) : request;
+        ManualRunStartResult result = experimentRunService.startManualRun(
+                experimentId,
+                currentSecurityActor.username(authentication),
+                startRequest.approvalId()
+        );
+        HttpStatus status = result.created() ? HttpStatus.CREATED : HttpStatus.OK;
+        return ResponseEntity.status(status).body(ChaosRunResponse.from(result.run()));
+    }
+
     @ExceptionHandler(ExperimentNotFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public void handleNotFound() {
@@ -69,5 +96,17 @@ public class ExperimentController {
     @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
     public ExperimentValidationResponse handleValidation(ExperimentValidationException exception) {
         return new ExperimentValidationResponse("Experiment validation failed.", exception.getErrors());
+    }
+
+    @ExceptionHandler(ManualRunStartException.class)
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+    public ManualRunStartErrorResponse handleManualRunStart(ManualRunStartException exception) {
+        return new ManualRunStartErrorResponse(exception.getMessage());
+    }
+
+    @ExceptionHandler(RunDispatchRejectedException.class)
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+    public DispatchValidationResponse handleRejected(RunDispatchRejectedException exception) {
+        return exception.getResponse();
     }
 }

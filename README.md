@@ -19,7 +19,7 @@ The default claim mapping expects:
 Route permissions are enforced consistently across the control plane:
 
 - `VIEWER`: dashboard and static UI routes, `/auth/me`, audit history, run status, kill-switch status, agent read APIs, and `GET /api/experiments`.
-- `OPERATOR`: experiment CRUD writes, dispatch validation, run authorization, and `/safety/runs/{runId}/stop`.
+- `OPERATOR`: experiment CRUD writes, `POST /api/experiments/{experimentId}/runs`, dispatch validation, run authorization, and `/safety/runs/{runId}/stop`.
 - `APPROVER`: `/safety/approvals`.
 - `ADMIN`: kill-switch enable and disable, plus all viewer/operator/approver capabilities.
 
@@ -100,6 +100,28 @@ curl -s -X POST \
       "team":"payments"
     }
   }'
+```
+
+Start a manual run from a saved experiment. The first call creates a running record with `startedAt`, a persisted target snapshot, and a run-start lifecycle event. Repeating the same request while that experiment still has an active run returns the existing run instead of creating a duplicate:
+
+```bash
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/api/experiments/<experiment-id>/runs \
+  -d '{}'
+```
+
+For production-like environments that require an approval, provide the previously issued approval id:
+
+```bash
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/api/experiments/<experiment-id>/runs \
+  -d '{"approvalId":"<approval-id>"}'
 ```
 
 The full role-to-route matrix and OIDC mapping notes are documented in `docs/security-auth.md`.

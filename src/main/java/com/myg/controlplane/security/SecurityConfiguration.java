@@ -35,6 +35,7 @@ public class SecurityConfiguration {
                 .requestMatchers(HttpMethod.GET, "/audit/events", "/safety/audit-records", "/safety/runs", "/safety/kill-switch", "/auth/me")
                 .hasAuthority(ChaosAuthority.VIEW)
                 .requestMatchers(HttpMethod.POST, "/api/experiments").hasAuthority(ChaosAuthority.OPERATE)
+                .requestMatchers(HttpMethod.POST, "/api/experiments/*/runs").hasAuthority(ChaosAuthority.OPERATE)
                 .requestMatchers(HttpMethod.PUT, "/api/experiments/*").hasAuthority(ChaosAuthority.OPERATE)
                 .requestMatchers(HttpMethod.DELETE, "/api/experiments/*").hasAuthority(ChaosAuthority.OPERATE)
                 .requestMatchers(HttpMethod.POST, "/safety/dispatches/validate", "/safety/dispatches", "/safety/runs/*/stop")

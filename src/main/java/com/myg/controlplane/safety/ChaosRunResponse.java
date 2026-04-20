@@ -5,6 +5,7 @@ import java.util.UUID;
 
 public record ChaosRunResponse(
         UUID id,
+        UUID experimentId,
         ChaosRunStatus status,
         String targetEnvironment,
         String targetSelector,
@@ -12,6 +13,8 @@ public record ChaosRunResponse(
         long requestedDurationSeconds,
         UUID approvalId,
         Instant createdAt,
+        Instant startedAt,
+        RunTargetSnapshot targetSnapshot,
         Instant stopCommandIssuedAt,
         String stopCommandIssuedBy,
         String stopCommandReason
@@ -19,6 +22,7 @@ public record ChaosRunResponse(
     public static ChaosRunResponse from(ChaosRun run) {
         return new ChaosRunResponse(
                 run.id(),
+                run.experimentId(),
                 run.status(),
                 run.targetEnvironment(),
                 run.targetSelector(),
@@ -26,6 +30,8 @@ public record ChaosRunResponse(
                 run.requestedDurationSeconds(),
                 run.approvalId(),
                 run.createdAt(),
+                run.startedAt(),
+                run.targetSnapshot(),
                 run.stopCommandIssuedAt(),
                 run.stopCommandIssuedBy(),
                 run.stopCommandReason()
