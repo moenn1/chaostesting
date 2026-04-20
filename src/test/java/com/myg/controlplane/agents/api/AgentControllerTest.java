@@ -30,6 +30,7 @@ import org.springframework.test.web.servlet.MvcResult;
 @TestPropertySource(properties = {
         "spring.datasource.generate-unique-name=true",
         "spring.datasource.url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE",
+        "spring.flyway.enabled=false",
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "chaos.auth.mode=dev"
 })
