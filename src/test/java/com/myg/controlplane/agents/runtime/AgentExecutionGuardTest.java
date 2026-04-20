@@ -8,6 +8,7 @@ import com.myg.controlplane.safety.AuditLogService;
 import com.myg.controlplane.safety.DispatchApprovalService;
 import com.myg.controlplane.safety.EnvironmentPolicyMode;
 import com.myg.controlplane.safety.KillSwitchService;
+import com.myg.controlplane.safety.LatencyInjectionProperties;
 import com.myg.controlplane.safety.SafetyGuardrailsProperties;
 import com.myg.controlplane.safety.SafetyGuardrailsService;
 import java.time.Clock;
@@ -35,9 +36,12 @@ class AgentExecutionGuardTest {
         properties.setControlledEnvironments(List.of("staging", "prod"));
         properties.setProductionLikeEnvironments(List.of("prod"));
         properties.setMaxDuration(Duration.ofMinutes(15));
+        LatencyInjectionProperties latencyInjectionProperties = new LatencyInjectionProperties();
+        latencyInjectionProperties.setMaxLatency(Duration.ofSeconds(5));
         SafetyGuardrailsService safetyGuardrailsService = new SafetyGuardrailsService(
                 Clock.fixed(Instant.parse("2026-04-20T16:00:00Z"), ZoneOffset.UTC),
                 properties,
+                latencyInjectionProperties,
                 dispatchApprovalService,
                 killSwitchService,
                 auditLogService
@@ -54,6 +58,8 @@ class AgentExecutionGuardTest {
                 "checkout",
                 "latency",
                 60 * 20L,
+                250,
+                30,
                 null
         );
 
@@ -71,6 +77,8 @@ class AgentExecutionGuardTest {
                 "checkout",
                 "latency",
                 300,
+                250,
+                30,
                 approvalId
         );
 

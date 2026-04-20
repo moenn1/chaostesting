@@ -13,24 +13,31 @@ public class SafetyGuardrailsService {
 
     private final Clock clock;
     private final SafetyGuardrailsProperties properties;
+    private final LatencyInjectionProperties latencyInjectionProperties;
     private final DispatchApprovalService dispatchApprovalService;
     private final KillSwitchService killSwitchService;
     private final AuditLogService auditLogService;
 
     public SafetyGuardrailsService(Clock clock,
                                    SafetyGuardrailsProperties properties,
+                                   LatencyInjectionProperties latencyInjectionProperties,
                                    DispatchApprovalService dispatchApprovalService,
                                    KillSwitchService killSwitchService,
                                    AuditLogService auditLogService) {
         this.clock = clock;
         this.properties = properties;
+        this.latencyInjectionProperties = latencyInjectionProperties;
         this.dispatchApprovalService = dispatchApprovalService;
         this.killSwitchService = killSwitchService;
         this.auditLogService = auditLogService;
     }
 
     public DispatchValidationResponse validate(RunDispatchRequest request) {
-        return evaluate(request).toResponse(request, properties.getMaxDuration().toSeconds());
+        return evaluate(request).toResponse(
+                request,
+                properties.getMaxDuration().toSeconds(),
+                latencyInjectionProperties.getMaxLatency().toMillis()
+        );
     }
 
     public DispatchAuthorizationResponse authorize(String requestedBy, RunDispatchRequest request) {
@@ -53,8 +60,10 @@ public class SafetyGuardrailsService {
                 "AUTHORIZED",
                 response.targetEnvironment(),
                 request.targetSelector().trim(),
-                request.faultType().trim(),
+                response.faultType(),
                 request.requestedDurationSeconds(),
+                request.latencyMilliseconds(),
+                request.trafficPercentage(),
                 request.approvalId(),
                 clock.instant()
         );
@@ -87,6 +96,10 @@ public class SafetyGuardrailsService {
             ));
         }
 
+        if ("latency".equals(request.normalizedFaultType())) {
+            evaluateLatencyConfiguration(request, violations);
+        }
+
         if (requiresApproval(normalizedEnvironment)) {
             if (request.approvalId() == null) {
                 violations.add(new GuardrailViolation(
@@ -104,6 +117,34 @@ public class SafetyGuardrailsService {
         }
 
         return new DispatchValidationResult(decide(violations), normalizedEnvironment, violations);
+    }
+
+    private void evaluateLatencyConfiguration(RunDispatchRequest request, List<GuardrailViolation> violations) {
+        if (request.latencyMilliseconds() == null || request.latencyMilliseconds() <= 0) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.LATENCY_AMOUNT_REQUIRED,
+                    "Latency faults require a positive latencyMilliseconds value."
+            ));
+        } else if (request.latencyMilliseconds() > latencyInjectionProperties.getMaxLatency().toMillis()) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.LATENCY_AMOUNT_EXCEEDED,
+                    "Latency amount %sms exceeds the configured max of %sms."
+                            .formatted(request.latencyMilliseconds(), latencyInjectionProperties.getMaxLatency().toMillis())
+            ));
+        }
+
+        if (request.trafficPercentage() == null || request.trafficPercentage() <= 0) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.TRAFFIC_PERCENTAGE_REQUIRED,
+                    "Latency faults require a trafficPercentage between 1 and 100."
+            ));
+        } else if (request.trafficPercentage() > 100) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.TRAFFIC_PERCENTAGE_INVALID,
+                    "Traffic percentage %s is outside the supported 1-100 range."
+                            .formatted(request.trafficPercentage())
+            ));
+        }
     }
 
     private DispatchDecision decide(List<GuardrailViolation> violations) {

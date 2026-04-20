@@ -9,6 +9,8 @@ public record AgentExecutionPlan(
         String targetSelector,
         String faultType,
         long requestedDurationSeconds,
+        Integer latencyMilliseconds,
+        Integer trafficPercentage,
         UUID approvalId
 ) {
     RunDispatchRequest toDispatchRequest() {
@@ -17,7 +19,10 @@ public record AgentExecutionPlan(
                 targetSelector,
                 faultType,
                 requestedDurationSeconds,
-                approvalId
+                latencyMilliseconds,
+                trafficPercentage,
+                approvalId,
+                "agent-runtime"
         );
     }
 }

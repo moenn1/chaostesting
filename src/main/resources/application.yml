@@ -35,3 +35,6 @@ chaos:
       - prod-shadow
     max-duration: 15m
     approval-ttl: 30m
+  latency:
+    max-latency: 5s
+    telemetry-interval: 30s

@@ -8,9 +8,13 @@ public record DispatchValidationResponse(
         boolean allowed,
         boolean requiresApproval,
         String targetEnvironment,
+        String faultType,
         long requestedDurationSeconds,
+        Integer latencyMilliseconds,
+        Integer trafficPercentage,
         UUID approvalId,
         long maxDurationSeconds,
+        long maxLatencyMilliseconds,
         List<GuardrailViolation> violations
 ) {
     public DispatchValidationResponse {

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -19,6 +20,7 @@ class SafetyGuardrailsServiceTest {
     private final AuditLogService auditLogService = Mockito.mock(AuditLogService.class);
 
     private SafetyGuardrailsProperties properties;
+    private LatencyInjectionProperties latencyInjectionProperties;
     private SafetyGuardrailsService safetyGuardrailsService;
 
     @BeforeEach
@@ -27,10 +29,13 @@ class SafetyGuardrailsServiceTest {
         properties.setEnvironmentPolicyMode(EnvironmentPolicyMode.ALLOWLIST);
         properties.setControlledEnvironments(List.of("dev", "staging", "prod"));
         properties.setProductionLikeEnvironments(List.of("prod"));
-        properties.setMaxDuration(java.time.Duration.ofMinutes(15));
+        properties.setMaxDuration(Duration.ofMinutes(15));
+        latencyInjectionProperties = new LatencyInjectionProperties();
+        latencyInjectionProperties.setMaxLatency(Duration.ofSeconds(5));
         safetyGuardrailsService = new SafetyGuardrailsService(
                 Clock.fixed(Instant.parse("2026-04-20T16:00:00Z"), ZoneOffset.UTC),
                 properties,
+                latencyInjectionProperties,
                 dispatchApprovalService,
                 killSwitchService,
                 auditLogService
@@ -43,7 +48,7 @@ class SafetyGuardrailsServiceTest {
         when(killSwitchService.isEnabled()).thenReturn(true);
 
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("staging", "checkout", "latency", 120, null)
+                new RunDispatchRequest("staging", "checkout", "latency", 120, 250, 30, null, "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -54,7 +59,7 @@ class SafetyGuardrailsServiceTest {
     @Test
     void rejectsEnvironmentOutsideAllowlist() {
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("qa", "payments", "latency", 60, null)
+                new RunDispatchRequest("qa", "payments", "latency", 60, 250, 30, null, "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -68,7 +73,7 @@ class SafetyGuardrailsServiceTest {
         properties.setControlledEnvironments(List.of("prod"));
 
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("prod", "payments", "latency", 60, null)
+                new RunDispatchRequest("prod", "payments", "latency", 60, 250, 30, null, "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -82,7 +87,7 @@ class SafetyGuardrailsServiceTest {
     @Test
     void marksProductionLikeDispatchesAsApprovalRequired() {
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("prod", "checkout", "http_error", 120, null)
+                new RunDispatchRequest("prod", "checkout", "http_error", 120, null, null, null, "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.APPROVAL_REQUIRED);
@@ -94,7 +99,7 @@ class SafetyGuardrailsServiceTest {
     @Test
     void rejectsDispatchesThatExceedMaxDuration() {
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("staging", "checkout", "latency", 60 * 20L, null)
+                new RunDispatchRequest("staging", "checkout", "latency", 60 * 20L, 250, 30, null, "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -108,7 +113,7 @@ class SafetyGuardrailsServiceTest {
         when(dispatchApprovalService.isActiveFor(approvalId, "prod")).thenReturn(true);
 
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("prod", "checkout", "latency", 120, approvalId)
+                new RunDispatchRequest("prod", "checkout", "latency", 120, 250, 30, approvalId, "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.ALLOWED);
@@ -121,11 +126,37 @@ class SafetyGuardrailsServiceTest {
         when(dispatchApprovalService.isActiveFor(approvalId, "prod")).thenReturn(false);
 
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("prod", "checkout", "latency", 120, approvalId)
+                new RunDispatchRequest("prod", "checkout", "latency", 120, 250, 30, approvalId, "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
         assertThat(response.violations()).extracting(GuardrailViolation::code)
                 .containsExactly(GuardrailViolationCode.APPROVAL_INVALID);
+    }
+
+    @Test
+    void rejectsLatencyDispatchWithoutLatencyAmountOrTrafficScope() {
+        DispatchValidationResponse response = safetyGuardrailsService.validate(
+                new RunDispatchRequest("staging", "checkout", "latency", 120, null, null, null, "operator-a")
+        );
+
+        assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
+        assertThat(response.violations()).extracting(GuardrailViolation::code)
+                .containsExactly(
+                        GuardrailViolationCode.LATENCY_AMOUNT_REQUIRED,
+                        GuardrailViolationCode.TRAFFIC_PERCENTAGE_REQUIRED
+                );
+    }
+
+    @Test
+    void rejectsLatencyDispatchThatExceedsConfiguredLatencyCeiling() {
+        DispatchValidationResponse response = safetyGuardrailsService.validate(
+                new RunDispatchRequest("staging", "checkout", "latency", 120, 6000, 30, null, "operator-a")
+        );
+
+        assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
+        assertThat(response.maxLatencyMilliseconds()).isEqualTo(5000);
+        assertThat(response.violations()).extracting(GuardrailViolation::code)
+                .containsExactly(GuardrailViolationCode.LATENCY_AMOUNT_EXCEEDED);
     }
 }

@@ -10,8 +10,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -19,11 +21,12 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -39,7 +42,8 @@ import org.springframework.test.web.servlet.MvcResult;
         "chaos.guardrails.production-like-environments[0]=prod",
         "chaos.guardrails.max-duration=15m",
         "chaos.guardrails.approval-ttl=30m",
-        "chaos.auth.mode=dev"
+        "chaos.auth.mode=dev",
+        "chaos.latency.max-latency=5s"
 })
 class RunDispatchControllerTest {
 
@@ -50,6 +54,9 @@ class RunDispatchControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private MutableClock clock;
+
     @Test
     void validatesNonProductionDispatchesWithoutApproval() throws Exception {
         mockMvc.perform(as(post("/safety/dispatches/validate"), "experiment-operator", "OPERATOR")
@@ -59,12 +66,16 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "staging",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 120
+                                  "requestedDurationSeconds": 120,
+                                  "latencyMilliseconds": 350,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "experiment-operator"
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.decision").value("ALLOWED"))
                 .andExpect(jsonPath("$.allowed").value(true))
+                .andExpect(jsonPath("$.maxLatencyMilliseconds").value(5000))
                 .andExpect(jsonPath("$.violations", hasSize(0)));
     }
 
@@ -77,7 +88,10 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "prod",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 120
+                                  "requestedDurationSeconds": 120,
+                                  "latencyMilliseconds": 350,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "experiment-operator"
                                 }
                                 """))
                 .andExpect(status().isUnprocessableEntity())
@@ -109,12 +123,17 @@ class RunDispatchControllerTest {
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
                                   "requestedDurationSeconds": 300,
-                                  "approvalId": "%s"
+                                  "latencyMilliseconds": 350,
+                                  "trafficPercentage": 30,
+                                  "approvalId": "%s",
+                                  "requestedBy": "experiment-operator"
                                 }
                                 """.formatted(approvalId)))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.status").value("AUTHORIZED"))
                 .andExpect(jsonPath("$.approvalId").value(approvalId))
+                .andExpect(jsonPath("$.latencyMilliseconds").value(350))
+                .andExpect(jsonPath("$.trafficPercentage").value(30))
                 .andExpect(jsonPath("$.targetEnvironment").value("prod"));
 
         mockMvc.perform(as(get("/audit/events")
@@ -137,6 +156,68 @@ class RunDispatchControllerTest {
     }
 
     @Test
+    void stopEndpointRollsBackRunAndPersistsTelemetryAndAuditTrail() throws Exception {
+        MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "checkout-service",
+                                  "faultType": "latency",
+                                  "requestedDurationSeconds": 120,
+                                  "latencyMilliseconds": 350,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "experiment-operator"
+                                }
+                                """))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        String runId = readField(dispatch.getResponse().getContentAsString(), "dispatchId");
+
+        mockMvc.perform(as(get("/safety/runs/{runId}/telemetry", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].phase").value("INJECTION"))
+                .andExpect(jsonPath("$[0].latencyMilliseconds").value(350))
+                .andExpect(jsonPath("$[0].trafficPercentage").value(30))
+                .andExpect(jsonPath("$[0].rollbackVerified").value(false));
+
+        clock.advanceSeconds(1);
+
+        mockMvc.perform(as(post("/safety/runs/{runId}/stop", runId), "ops-oncall", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "customer-impact containment"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(runId))
+                .andExpect(jsonPath("$.status").value("ROLLED_BACK"))
+                .andExpect(jsonPath("$.stopCommandIssuedBy").value("ops-oncall"))
+                .andExpect(jsonPath("$.stopCommandReason").value("customer-impact containment"))
+                .andExpect(jsonPath("$.rollbackVerifiedAt").exists());
+
+        mockMvc.perform(as(get("/safety/runs/{runId}/telemetry", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].phase").value("ROLLBACK"))
+                .andExpect(jsonPath("$[0].rollbackVerified").value(true))
+                .andExpect(jsonPath("$[1].phase").value("INJECTION"));
+
+        mockMvc.perform(as(get("/safety/audit-records").param("resourceId", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(3)))
+                .andExpect(jsonPath("$[0].action").value("RUN_ROLLBACK_VERIFIED"))
+                .andExpect(jsonPath("$[0].actor").value("ops-oncall"))
+                .andExpect(jsonPath("$[1].action").value("RUN_STOP_REQUESTED"))
+                .andExpect(jsonPath("$[1].actor").value("ops-oncall"))
+                .andExpect(jsonPath("$[2].action").value("RUN_STARTED"))
+                .andExpect(jsonPath("$[2].actor").value("experiment-operator"));
+    }
+
+    @Test
     void enablingKillSwitchStopsActiveRunsAndWritesAuditMetadata() throws Exception {
         MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -145,13 +226,17 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "staging",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 120
+                                  "requestedDurationSeconds": 120,
+                                  "latencyMilliseconds": 350,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "experiment-operator"
                                 }
                                 """))
                 .andExpect(status().isAccepted())
                 .andReturn();
 
         String runId = readField(dispatch.getResponse().getContentAsString(), "dispatchId");
+        clock.advanceSeconds(1);
 
         mockMvc.perform(as(post("/safety/kill-switch/enable"), "ops-oncall", "ADMIN")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -165,36 +250,26 @@ class RunDispatchControllerTest {
                 .andExpect(jsonPath("$.lastEnabledBy").value("ops-oncall"))
                 .andExpect(jsonPath("$.lastEnableReason").value("customer-impact containment"))
                 .andExpect(jsonPath("$.activeRunCount").value(0))
-                .andExpect(jsonPath("$.stopRequestedRunCount").value(1));
+                .andExpect(jsonPath("$.stopRequestedRunCount").value(0))
+                .andExpect(jsonPath("$.rolledBackRunCount").value(1))
+                .andExpect(jsonPath("$.stopRequestsIssued").value(1));
 
-        mockMvc.perform(as(get("/safety/runs").param("status", "stop_requested"), "viewer", "VIEWER"))
+        mockMvc.perform(as(get("/safety/runs").param("status", "rolled_back"), "viewer", "VIEWER"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].id").value(runId))
-                .andExpect(jsonPath("$[0].status").value("STOP_REQUESTED"))
+                .andExpect(jsonPath("$[0].status").value("ROLLED_BACK"))
                 .andExpect(jsonPath("$[0].stopCommandIssuedBy").value("ops-oncall"))
                 .andExpect(jsonPath("$[0].stopCommandReason").value("customer-impact containment"));
 
-        mockMvc.perform(as(get("/audit/events")
-                        .param("resourceType", "run")
-                        .param("resourceId", runId), "viewer", "VIEWER"))
+        mockMvc.perform(as(get("/safety/audit-records"), "viewer", "VIEWER"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(2)))
-                .andExpect(jsonPath("$[0].action").value("RUN_STOP_REQUESTED"))
+                .andExpect(jsonPath("$", hasSize(4)))
+                .andExpect(jsonPath("$[0].action").value("RUN_ROLLBACK_VERIFIED"))
                 .andExpect(jsonPath("$[0].resourceId").value(runId))
-                .andExpect(jsonPath("$[0].actor").value("ops-oncall"))
-                .andExpect(jsonPath("$[0].summary").value("customer-impact containment"))
-                .andExpect(jsonPath("$[1].action").value("RUN_STARTED"))
-                .andExpect(jsonPath("$[1].actor").value("experiment-operator"))
-                .andExpect(jsonPath("$[1].metadata.targetSelector").value("checkout-service"));
-
-        mockMvc.perform(as(get("/safety/audit-records")
-                        .param("action", "kill_switch_enabled")
-                        .param("resourceType", "kill_switch"), "viewer", "VIEWER"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].actor").value("ops-oncall"))
-                .andExpect(jsonPath("$[0].summary").value("customer-impact containment"));
+                .andExpect(jsonPath("$[?(@.action=='RUN_STOP_REQUESTED' && @.resourceId=='%s')]".formatted(runId)).exists())
+                .andExpect(jsonPath("$[?(@.action=='KILL_SWITCH_ENABLED' && @.resourceId=='global')]").exists())
+                .andExpect(jsonPath("$[?(@.action=='RUN_STARTED' && @.resourceId=='%s')]".formatted(runId)).exists());
     }
 
     @Test
@@ -215,7 +290,10 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "staging",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 120
+                                  "requestedDurationSeconds": 120,
+                                  "latencyMilliseconds": 350,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "ops-oncall"
                                 }
                                 """))
                 .andExpect(status().isUnprocessableEntity())
@@ -246,7 +324,10 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "staging",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 1200
+                                  "requestedDurationSeconds": 1200,
+                                  "latencyMilliseconds": 350,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "experiment-operator"
                                 }
                                 """))
                 .andExpect(status().isOk())
@@ -296,7 +377,10 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "staging",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 120
+                                  "requestedDurationSeconds": 120,
+                                  "latencyMilliseconds": 350,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "experiment-operator"
                                 }
                                 """))
                 .andExpect(status().isAccepted())
@@ -313,7 +397,7 @@ class RunDispatchControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(runId))
-                .andExpect(jsonPath("$.status").value("STOP_REQUESTED"))
+                .andExpect(jsonPath("$.status").value("ROLLED_BACK"))
                 .andExpect(jsonPath("$.stopCommandIssuedBy").value("experiment-operator"))
                 .andExpect(jsonPath("$.stopCommandReason").value("manual abort"));
 
@@ -324,7 +408,7 @@ class RunDispatchControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].actor").value("experiment-operator"))
-                .andExpect(jsonPath("$[0].summary").value("manual abort"));
+                .andExpect(jsonPath("$[0].summary").value("Stop requested for checkout-service"));
     }
 
     @Test
@@ -336,7 +420,10 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "staging",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 120
+                                  "requestedDurationSeconds": 120,
+                                  "latencyMilliseconds": 350,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "observer"
                                 }
                                 """), "observer", "VIEWER"))
                 .andExpect(status().isForbidden());
@@ -381,7 +468,10 @@ class RunDispatchControllerTest {
                                   "targetEnvironment": "staging",
                                   "targetSelector": "checkout-service",
                                   "faultType": "latency",
-                                  "requestedDurationSeconds": 120
+                                  "requestedDurationSeconds": 120,
+                                  "latencyMilliseconds": 350,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "platform-approver"
                                 }
                                 """))
                 .andExpect(status().isForbidden());
@@ -401,9 +491,20 @@ class RunDispatchControllerTest {
     static class ClockConfiguration {
 
         @Bean
+        MutableClock mutableClock() {
+            return new MutableClock(Instant.parse("2026-04-20T16:00:00Z"), ZoneOffset.UTC);
+        }
+
+        @Bean
         @Primary
-        Clock testClock() {
-            return Clock.fixed(Instant.parse("2026-04-20T16:00:00Z"), ZoneOffset.UTC);
+        Clock testClock(MutableClock mutableClock) {
+            return mutableClock;
+        }
+
+        @Bean
+        @Primary
+        TaskScheduler testTaskScheduler() {
+            return Mockito.mock(TaskScheduler.class);
         }
     }
 
@@ -416,5 +517,34 @@ class RunDispatchControllerTest {
         return builder
                 .header(DEV_USER_HEADER, username)
                 .header(DEV_ROLES_HEADER, roles);
+    }
+
+    static final class MutableClock extends Clock {
+        private Instant instant;
+        private final ZoneId zoneId;
+
+        MutableClock(Instant instant, ZoneId zoneId) {
+            this.instant = instant;
+            this.zoneId = zoneId;
+        }
+
+        void advanceSeconds(long seconds) {
+            instant = instant.plusSeconds(seconds);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return zoneId;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return new MutableClock(instant, zone);
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
+        }
     }
 }

@@ -9,9 +9,13 @@ public record ChaosRun(
         String targetSelector,
         String faultType,
         long requestedDurationSeconds,
+        Integer latencyMilliseconds,
+        Integer trafficPercentage,
         UUID approvalId,
         ChaosRunStatus status,
         Instant createdAt,
+        Instant rollbackScheduledAt,
+        Instant rollbackVerifiedAt,
         Instant stopCommandIssuedAt,
         String stopCommandIssuedBy,
         String stopCommandReason

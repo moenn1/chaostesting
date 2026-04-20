@@ -2,18 +2,22 @@ package com.myg.controlplane;
 
 import com.myg.controlplane.agents.service.AgentRegistryProperties;
 import com.myg.controlplane.security.ChaosAuthProperties;
+import com.myg.controlplane.safety.LatencyInjectionProperties;
 import com.myg.controlplane.safety.SafetyGuardrailsProperties;
 import java.time.Clock;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 @SpringBootApplication
 @EnableConfigurationProperties({
         AgentRegistryProperties.class,
         ChaosAuthProperties.class,
-        SafetyGuardrailsProperties.class
+        SafetyGuardrailsProperties.class,
+        LatencyInjectionProperties.class
 })
 public class ChaosPlatformApplication {
 
@@ -24,5 +28,14 @@ public class ChaosPlatformApplication {
     @Bean
     Clock clock() {
         return Clock.systemUTC();
+    }
+
+    @Bean
+    TaskScheduler taskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(2);
+        scheduler.setThreadNamePrefix("chaos-runtime-");
+        scheduler.initialize();
+        return scheduler;
     }
 }

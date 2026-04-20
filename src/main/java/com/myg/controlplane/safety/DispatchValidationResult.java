@@ -11,15 +11,21 @@ record DispatchValidationResult(
         violations = List.copyOf(violations);
     }
 
-    DispatchValidationResponse toResponse(RunDispatchRequest request, long maxDurationSeconds) {
+    DispatchValidationResponse toResponse(RunDispatchRequest request,
+                                          long maxDurationSeconds,
+                                          long maxLatencyMilliseconds) {
         return new DispatchValidationResponse(
                 decision,
                 decision == DispatchDecision.ALLOWED,
                 decision == DispatchDecision.APPROVAL_REQUIRED,
                 normalizedEnvironment,
+                request.normalizedFaultType(),
                 request.requestedDurationSeconds(),
+                request.latencyMilliseconds(),
+                request.trafficPercentage(),
                 request.approvalId(),
                 maxDurationSeconds,
+                maxLatencyMilliseconds,
                 violations
         );
     }

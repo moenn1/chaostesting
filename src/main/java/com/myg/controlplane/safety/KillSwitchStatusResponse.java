@@ -12,11 +12,15 @@ public record KillSwitchStatusResponse(
         Instant lastDisabledAt,
         Instant updatedAt,
         long activeRunCount,
-        long stopRequestedRunCount
+        long stopRequestedRunCount,
+        long rolledBackRunCount,
+        long stopRequestsIssued
 ) {
     public static KillSwitchStatusResponse from(KillSwitchState state,
                                                 long activeRunCount,
-                                                long stopRequestedRunCount) {
+                                                long stopRequestedRunCount,
+                                                long rolledBackRunCount,
+                                                long stopRequestsIssued) {
         return new KillSwitchStatusResponse(
                 state.enabled(),
                 state.lastEnabledBy(),
@@ -27,7 +31,9 @@ public record KillSwitchStatusResponse(
                 state.lastDisabledAt(),
                 state.updatedAt(),
                 activeRunCount,
-                stopRequestedRunCount
+                stopRequestedRunCount,
+                rolledBackRunCount,
+                stopRequestsIssued
         );
     }
 }

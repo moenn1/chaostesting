@@ -1,15 +1,16 @@
 package com.myg.controlplane.safety;
 
+import com.myg.controlplane.security.CurrentSecurityActor;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -18,7 +19,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import com.myg.controlplane.security.CurrentSecurityActor;
 
 @RestController
 @RequestMapping("/safety")
@@ -70,6 +70,18 @@ public class RunDispatchController {
     @PreAuthorize("hasAuthority('chaos.view')")
     public List<ChaosRunResponse> listRuns(@RequestParam Optional<String> status) {
         return chaosRunService.findAll(status.map(this::parseRunStatus));
+    }
+
+    @GetMapping("/runs/{runId}")
+    @PreAuthorize("hasAuthority('chaos.view')")
+    public ChaosRunResponse getRun(@PathVariable UUID runId) {
+        return chaosRunService.getRun(runId);
+    }
+
+    @GetMapping("/runs/{runId}/telemetry")
+    @PreAuthorize("hasAuthority('chaos.view')")
+    public List<LatencyTelemetrySnapshotResponse> listTelemetry(@PathVariable UUID runId) {
+        return chaosRunService.findTelemetry(runId);
     }
 
     @PostMapping("/runs/{runId}/stop")
