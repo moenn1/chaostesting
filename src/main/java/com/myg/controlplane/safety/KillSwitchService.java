@@ -39,23 +39,23 @@ public class KillSwitchService {
     }
 
     @Transactional
-    public KillSwitchStatusResponse enable(KillSwitchCommandRequest request) {
+    public KillSwitchStatusResponse enable(String operator, KillSwitchCommandRequest request) {
         Instant now = clock.instant();
-        String operator = request.operator().trim();
+        String normalizedOperator = operator.trim();
         String reason = request.reason().trim();
 
         KillSwitchStateEntity stateEntity = loadOrCreate(now);
-        stateEntity.enable(operator, reason, now);
+        stateEntity.enable(normalizedOperator, reason, now);
 
         List<ChaosRunEntity> activeRuns = chaosRunJpaRepository.findAllByStatus(ChaosRunStatus.ACTIVE);
-        activeRuns.forEach(run -> run.markStopRequested(operator, reason, now));
+        activeRuns.forEach(run -> run.markStopRequested(normalizedOperator, reason, now));
 
         killSwitchStateJpaRepository.save(stateEntity);
         auditLogService.record(
                 SafetyAuditEventType.KILL_SWITCH_ENABLED,
                 AuditResourceType.KILL_SWITCH,
                 "global",
-                operator,
+                normalizedOperator,
                 reason,
                 Map.of("affectedActiveRunCount", activeRuns.size(), "enabledAt", now),
                 now
@@ -66,7 +66,7 @@ public class KillSwitchService {
                     SafetyAuditEventType.RUN_STOP_REQUESTED,
                     AuditResourceType.RUN,
                     run.id().toString(),
-                    operator,
+                    normalizedOperator,
                     reason,
                     runStopMetadata(run, now),
                     now.plusMillis(index + 1L)
@@ -77,19 +77,19 @@ public class KillSwitchService {
     }
 
     @Transactional
-    public KillSwitchStatusResponse disable(KillSwitchCommandRequest request) {
+    public KillSwitchStatusResponse disable(String operator, KillSwitchCommandRequest request) {
         Instant now = clock.instant();
-        String operator = request.operator().trim();
+        String normalizedOperator = operator.trim();
         String reason = request.reason().trim();
 
         KillSwitchStateEntity stateEntity = loadOrCreate(now);
-        stateEntity.disable(operator, reason, now);
+        stateEntity.disable(normalizedOperator, reason, now);
         killSwitchStateJpaRepository.save(stateEntity);
         auditLogService.record(
                 SafetyAuditEventType.KILL_SWITCH_DISABLED,
                 AuditResourceType.KILL_SWITCH,
                 "global",
-                operator,
+                normalizedOperator,
                 reason,
                 Map.of("enabled", false, "disabledAt", now),
                 now

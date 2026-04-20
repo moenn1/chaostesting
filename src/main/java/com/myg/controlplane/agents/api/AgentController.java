@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -48,6 +49,7 @@ public class AgentController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('chaos.view')")
     public List<AgentResponse> listAgents(@RequestParam Optional<String> environment,
                                           @RequestParam Optional<String> region,
                                           @RequestParam Optional<String> status,
@@ -59,6 +61,7 @@ public class AgentController {
     }
 
     @GetMapping("/{agentId}")
+    @PreAuthorize("hasAuthority('chaos.view')")
     public AgentResponse getAgent(@PathVariable UUID agentId) {
         return agentRegistryService.findById(agentId)
                 .map(AgentResponse::from)

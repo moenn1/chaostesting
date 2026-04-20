@@ -33,14 +33,14 @@ public class SafetyGuardrailsService {
         return evaluate(request).toResponse(request, properties.getMaxDuration().toSeconds());
     }
 
-    public DispatchAuthorizationResponse authorize(RunDispatchRequest request) {
+    public DispatchAuthorizationResponse authorize(String requestedBy, RunDispatchRequest request) {
         DispatchValidationResponse response = validate(request);
         if (response.decision() != DispatchDecision.ALLOWED) {
             auditLogService.record(
                     SafetyAuditEventType.RUN_START_REJECTED,
                     AuditResourceType.RUN_DISPATCH,
                     UUID.randomUUID().toString(),
-                    request.requestedBy().trim(),
+                    requestedBy.trim(),
                     "Run start rejected by safety guardrails",
                     rejectedDispatchMetadata(request, response),
                     clock.instant()

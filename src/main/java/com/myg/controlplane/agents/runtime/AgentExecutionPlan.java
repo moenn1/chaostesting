@@ -17,8 +17,7 @@ public record AgentExecutionPlan(
                 targetSelector,
                 faultType,
                 requestedDurationSeconds,
-                approvalId,
-                "agent-runtime"
+                approvalId
         );
     }
 }

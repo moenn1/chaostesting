@@ -20,6 +20,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -29,9 +30,13 @@ import org.springframework.test.web.servlet.MvcResult;
 @TestPropertySource(properties = {
         "spring.datasource.generate-unique-name=true",
         "spring.datasource.url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE",
-        "spring.jpa.hibernate.ddl-auto=create-drop"
+        "spring.jpa.hibernate.ddl-auto=create-drop",
+        "chaos.auth.mode=dev"
 })
 class AgentControllerTest {
+
+    private static final String DEV_USER_HEADER = "X-Chaos-Dev-User";
+    private static final String DEV_ROLES_HEADER = "X-Chaos-Dev-Roles";
 
     @Autowired
     private MockMvc mockMvc;
@@ -64,15 +69,15 @@ class AgentControllerTest {
 
         String agentId = JsonFieldExtractor.read(registration.getResponse().getContentAsString(), "id");
 
-        mockMvc.perform(get("/agents/{agentId}", agentId))
+        mockMvc.perform(as(get("/agents/{agentId}", agentId), "viewer", "VIEWER"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(agentId))
                 .andExpect(jsonPath("$.status").value("HEALTHY"));
 
-        mockMvc.perform(get("/audit/events")
+        mockMvc.perform(as(get("/audit/events")
                         .param("action", "agent_registered")
                         .param("resourceType", "agent")
-                        .param("actor", "agent-eu-1"))
+                        .param("actor", "agent-eu-1"), "viewer", "VIEWER"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].resourceId").value(agentId))
@@ -102,7 +107,7 @@ class AgentControllerTest {
         String agentId = JsonFieldExtractor.read(registration.getResponse().getContentAsString(), "id");
         clock.advanceSeconds(31);
 
-        mockMvc.perform(get("/agents").param("status", "stale"))
+        mockMvc.perform(as(get("/agents").param("status", "stale"), "viewer", "VIEWER"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].id").value(agentId))
@@ -119,7 +124,7 @@ class AgentControllerTest {
                 .andExpect(jsonPath("$.id").value(agentId))
                 .andExpect(jsonPath("$.status").value("HEALTHY"));
 
-        mockMvc.perform(get("/agents").param("status", "healthy"))
+        mockMvc.perform(as(get("/agents").param("status", "healthy"), "viewer", "VIEWER"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.id=='%s')]".formatted(agentId)).exists());
     }
@@ -152,10 +157,10 @@ class AgentControllerTest {
                                 """))
                 .andExpect(status().isCreated());
 
-        mockMvc.perform(get("/agents")
+        mockMvc.perform(as(get("/agents")
                         .param("environment", "prod")
                         .param("region", "eu-central-1")
-                        .param("capability", "process_kill"))
+                        .param("capability", "process_kill"), "viewer", "VIEWER"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].name").value("agent-prod-eu"));
@@ -215,5 +220,11 @@ class AgentControllerTest {
         public Instant instant() {
             return instant;
         }
+    }
+
+    private static MockHttpServletRequestBuilder as(MockHttpServletRequestBuilder builder, String username, String roles) {
+        return builder
+                .header(DEV_USER_HEADER, username)
+                .header(DEV_ROLES_HEADER, roles);
     }
 }

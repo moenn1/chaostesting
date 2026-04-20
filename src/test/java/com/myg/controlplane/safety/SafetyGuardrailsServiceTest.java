@@ -43,7 +43,7 @@ class SafetyGuardrailsServiceTest {
         when(killSwitchService.isEnabled()).thenReturn(true);
 
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("staging", "checkout", "latency", 120, null, "test-operator")
+                new RunDispatchRequest("staging", "checkout", "latency", 120, null)
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -54,7 +54,7 @@ class SafetyGuardrailsServiceTest {
     @Test
     void rejectsEnvironmentOutsideAllowlist() {
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("qa", "payments", "latency", 60, null, "test-operator")
+                new RunDispatchRequest("qa", "payments", "latency", 60, null)
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -68,7 +68,7 @@ class SafetyGuardrailsServiceTest {
         properties.setControlledEnvironments(List.of("prod"));
 
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("prod", "payments", "latency", 60, null, "test-operator")
+                new RunDispatchRequest("prod", "payments", "latency", 60, null)
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -82,7 +82,7 @@ class SafetyGuardrailsServiceTest {
     @Test
     void marksProductionLikeDispatchesAsApprovalRequired() {
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("prod", "checkout", "http_error", 120, null, "test-operator")
+                new RunDispatchRequest("prod", "checkout", "http_error", 120, null)
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.APPROVAL_REQUIRED);
@@ -94,7 +94,7 @@ class SafetyGuardrailsServiceTest {
     @Test
     void rejectsDispatchesThatExceedMaxDuration() {
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("staging", "checkout", "latency", 60 * 20L, null, "test-operator")
+                new RunDispatchRequest("staging", "checkout", "latency", 60 * 20L, null)
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -108,7 +108,7 @@ class SafetyGuardrailsServiceTest {
         when(dispatchApprovalService.isActiveFor(approvalId, "prod")).thenReturn(true);
 
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("prod", "checkout", "latency", 120, approvalId, "test-operator")
+                new RunDispatchRequest("prod", "checkout", "latency", 120, approvalId)
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.ALLOWED);
@@ -121,7 +121,7 @@ class SafetyGuardrailsServiceTest {
         when(dispatchApprovalService.isActiveFor(approvalId, "prod")).thenReturn(false);
 
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("prod", "checkout", "latency", 120, approvalId, "test-operator")
+                new RunDispatchRequest("prod", "checkout", "latency", 120, approvalId)
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);

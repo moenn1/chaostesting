@@ -27,12 +27,12 @@ public class DispatchApprovalService {
     }
 
     @Transactional
-    public DispatchApproval createApproval(DispatchApprovalRequest request) {
+    public DispatchApproval createApproval(String approvedBy, DispatchApprovalRequest request) {
         Instant now = clock.instant();
         DispatchApprovalEntity entity = new DispatchApprovalEntity(
                 UUID.randomUUID(),
                 properties.normalizeEnvironment(request.targetEnvironment()),
-                request.approvedBy().trim(),
+                approvedBy.trim(),
                 request.reason().trim(),
                 now,
                 now.plus(properties.getApprovalTtl())

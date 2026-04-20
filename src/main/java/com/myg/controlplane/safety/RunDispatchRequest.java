@@ -10,8 +10,7 @@ public record RunDispatchRequest(
         @NotBlank String targetSelector,
         @NotBlank String faultType,
         @Positive long requestedDurationSeconds,
-        UUID approvalId,
-        @NotBlank String requestedBy
+        UUID approvalId
 ) {
     public Duration requestedDuration() {
         return Duration.ofSeconds(requestedDurationSeconds);

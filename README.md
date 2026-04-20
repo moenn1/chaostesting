@@ -2,6 +2,29 @@
 
 Spring Boot control-plane service for the Chaos Platform.
 
+## Authentication and RBAC
+
+The platform now defaults to `chaos.auth.mode=oidc` outside local development. Configure your OIDC client registration with Spring Security and expose a claim that contains one or more of these role names:
+
+- `VIEWER`
+- `OPERATOR`
+- `APPROVER`
+- `ADMIN`
+
+The default claim mapping expects:
+
+- role claim: `groups`
+- principal claim: `preferred_username`
+
+Route permissions are enforced consistently across the control plane:
+
+- `VIEWER`: dashboard and static UI routes, `/auth/me`, audit history, run status, kill-switch status, and agent read APIs.
+- `OPERATOR`: dispatch validation, run authorization, and `/safety/runs/{runId}/stop`.
+- `APPROVER`: `/safety/approvals`.
+- `ADMIN`: kill-switch enable and disable, plus all viewer/operator/approver capabilities.
+
+Machine registration endpoints `/agents/register` and `/agents/heartbeat` stay open for now so the current runtime continues working. They are intentionally left for the signed agent-auth hardening tracked in `MYG-44`.
+
 ## Local development
 
 Prerequisites:
@@ -21,6 +44,32 @@ Start the application against the local stack:
 ```bash
 make run-local
 ```
+
+The local profile enables the documented development-only auth mode:
+
+- default user: `local-admin`
+- default role: `ADMIN`
+- impersonation headers: `X-Chaos-Dev-User` and `X-Chaos-Dev-Roles`
+
+Example requests:
+
+```bash
+curl -s \
+  -H 'X-Chaos-Dev-User: viewer-demo' \
+  -H 'X-Chaos-Dev-Roles: VIEWER' \
+  http://localhost:8080/auth/me
+```
+
+```bash
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/safety/dispatches/validate \
+  -d '{"targetEnvironment":"staging","targetSelector":"checkout-service","faultType":"latency","requestedDurationSeconds":120}'
+```
+
+The full role-to-route matrix and OIDC mapping notes are documented in `docs/security-auth.md`.
 
 Check local health after the app is running:
 

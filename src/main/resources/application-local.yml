@@ -25,3 +25,11 @@ management:
 
 agent-registry:
   stale-after: 12h
+
+chaos:
+  auth:
+    mode: dev
+    dev:
+      default-username: local-admin
+      default-roles:
+        - ADMIN

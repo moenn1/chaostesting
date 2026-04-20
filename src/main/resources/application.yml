@@ -16,6 +16,11 @@ agent-registry:
   stale-after: 30s
 
 chaos:
+  auth:
+    mode: oidc
+    oidc:
+      role-claim: groups
+      principal-claim: preferred_username
   guardrails:
     environment-policy-mode: allowlist
     controlled-environments:
