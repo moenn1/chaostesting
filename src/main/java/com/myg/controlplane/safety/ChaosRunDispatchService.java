@@ -32,7 +32,11 @@ public class ChaosRunDispatchService {
                 request.faultType(),
                 request.requestedDurationSeconds(),
                 request.latencyMilliseconds(),
+                request.latencyJitterMilliseconds(),
+                request.latencyMinimumMilliseconds(),
+                request.latencyMaximumMilliseconds(),
                 request.trafficPercentage(),
+                request.dropPercentage(),
                 request.approvalId(),
                 normalizedRequestedBy
         );

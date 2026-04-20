@@ -10,7 +10,11 @@ public record AgentExecutionPlan(
         String faultType,
         long requestedDurationSeconds,
         Integer latencyMilliseconds,
+        Integer latencyJitterMilliseconds,
+        Integer latencyMinimumMilliseconds,
+        Integer latencyMaximumMilliseconds,
         Integer trafficPercentage,
+        Integer dropPercentage,
         UUID approvalId
 ) {
     RunDispatchRequest toDispatchRequest() {
@@ -20,7 +24,11 @@ public record AgentExecutionPlan(
                 faultType,
                 requestedDurationSeconds,
                 latencyMilliseconds,
+                latencyJitterMilliseconds,
+                latencyMinimumMilliseconds,
+                latencyMaximumMilliseconds,
                 trafficPercentage,
+                dropPercentage,
                 approvalId,
                 "agent-runtime"
         );

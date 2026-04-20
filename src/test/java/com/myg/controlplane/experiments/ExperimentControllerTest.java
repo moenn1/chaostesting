@@ -82,6 +82,7 @@ class ExperimentControllerTest {
                 .andExpect(jsonPath("$.description").value("Inject 500ms latency into a guarded checkout canary lane."))
                 .andExpect(jsonPath("$.faultConfig.durationSeconds").value(600))
                 .andExpect(jsonPath("$.faultConfig.parameters.percentage").value(20))
+                .andExpect(jsonPath("$.faultConfig.parameters.jitterMs").value(50))
                 .andExpect(jsonPath("$.safetyRules.maxAffectedTargets").value(1));
 
         mockMvc.perform(as(delete("/api/experiments/{experimentId}", experimentId), "operator-demo", "OPERATOR"))
@@ -124,8 +125,77 @@ class ExperimentControllerTest {
                 .andExpect(jsonPath("$.errors", hasSize(4)))
                 .andExpect(jsonPath("$.errors[0].field").value("targetSelector"))
                 .andExpect(jsonPath("$.errors[1].field").value("faultConfig.durationSeconds"))
-                .andExpect(jsonPath("$.errors[2].field").value("faultConfig.parameters.latencyMs"))
-                .andExpect(jsonPath("$.errors[3].field").value("faultConfig.parameters.percentage"));
+                .andExpect(jsonPath("$.errors[?(@.field=='faultConfig.parameters.latencyMs')]").exists())
+                .andExpect(jsonPath("$.errors[?(@.field=='faultConfig.parameters.percentage')]").exists());
+    }
+
+    @Test
+    void supportsRequestDropAndBoundedLatencyExperimentShapes() throws Exception {
+        mockMvc.perform(as(post("/api/experiments"), "operator-demo", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Gateway random latency envelope",
+                                  "description": "Apply bounded random latency across the gateway canary path.",
+                                  "targetSelector": {
+                                    "service": "edge-gateway",
+                                    "namespace": "ingress"
+                                  },
+                                  "faultConfig": {
+                                    "type": "latency",
+                                    "durationSeconds": 300,
+                                    "parameters": {
+                                      "minLatencyMs": 120,
+                                      "maxLatencyMs": 360,
+                                      "percentage": 25
+                                    }
+                                  },
+                                  "safetyRules": {
+                                    "abortConditions": ["Abort if p95 exceeds 450ms"],
+                                    "maxAffectedTargets": 1,
+                                    "approvalRequired": false,
+                                    "rollbackMode": "automatic"
+                                  },
+                                  "environmentMetadata": {
+                                    "environment": "staging"
+                                  }
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.faultConfig.parameters.minLatencyMs").value(120))
+                .andExpect(jsonPath("$.faultConfig.parameters.maxLatencyMs").value(360));
+
+        mockMvc.perform(as(post("/api/experiments"), "operator-demo", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Gateway request drop rehearsal",
+                                  "description": "Drop a slice of ingress traffic without forcing an HTTP code.",
+                                  "targetSelector": {
+                                    "service": "edge-gateway",
+                                    "namespace": "ingress"
+                                  },
+                                  "faultConfig": {
+                                    "type": "request_drop",
+                                    "durationSeconds": 180,
+                                    "parameters": {
+                                      "percentage": 12
+                                    }
+                                  },
+                                  "safetyRules": {
+                                    "abortConditions": ["Abort if checkout availability drops below 99.5%"],
+                                    "maxAffectedTargets": 1,
+                                    "approvalRequired": false,
+                                    "rollbackMode": "automatic"
+                                  },
+                                  "environmentMetadata": {
+                                    "environment": "staging"
+                                  }
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.faultConfig.type").value("request_drop"))
+                .andExpect(jsonPath("$.faultConfig.parameters.percentage").value(12));
     }
 
     @Test

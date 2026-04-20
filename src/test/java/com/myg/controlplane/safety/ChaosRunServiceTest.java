@@ -75,7 +75,11 @@ class ChaosRunServiceTest {
                 "latency",
                 120,
                 350,
+                40,
+                null,
+                null,
                 30,
+                null,
                 null,
                 clock.instant()
         );
@@ -85,7 +89,11 @@ class ChaosRunServiceTest {
                 "latency",
                 120,
                 350,
+                40,
+                null,
+                null,
                 30,
+                null,
                 null,
                 "experiment-operator"
         );
@@ -116,13 +124,62 @@ class ChaosRunServiceTest {
                 any(String.class),
                 any(Map.class),
                 any(Instant.class)
-        );
+                );
         assertThat(actionCaptor.getAllValues())
                 .containsExactly(
                         SafetyAuditEventType.RUN_STARTED,
                         SafetyAuditEventType.RUN_STOP_REQUESTED,
                         SafetyAuditEventType.RUN_ROLLBACK_VERIFIED
                 );
+    }
+
+    @Test
+    void requestDropRunPersistsFaultShapeAcrossTelemetryAndRollback() {
+        UUID runId = UUID.randomUUID();
+        DispatchAuthorizationResponse authorization = new DispatchAuthorizationResponse(
+                runId,
+                "AUTHORIZED",
+                "staging",
+                "edge-gateway",
+                "request_drop",
+                90,
+                null,
+                null,
+                null,
+                null,
+                null,
+                12,
+                null,
+                clock.instant()
+        );
+        RunDispatchRequest request = new RunDispatchRequest(
+                "staging",
+                "edge-gateway",
+                "request_drop",
+                90,
+                null,
+                null,
+                null,
+                null,
+                null,
+                12,
+                null,
+                "experiment-operator"
+        );
+
+        chaosRunService.startAuthorizedRun(authorization, request);
+        ChaosRunResponse stopped = chaosRunService.stopRun(runId, "ops-oncall", "containment");
+
+        assertThat(stopped.faultType()).isEqualTo("request_drop");
+        assertThat(stopped.dropPercentage()).isEqualTo(12);
+
+        ArgumentCaptor<LatencyTelemetrySnapshotEntity> telemetryCaptor =
+                ArgumentCaptor.forClass(LatencyTelemetrySnapshotEntity.class);
+        verify(latencyTelemetrySnapshotJpaRepository, Mockito.times(2)).save(telemetryCaptor.capture());
+        assertThat(telemetryCaptor.getAllValues())
+                .extracting(LatencyTelemetrySnapshotEntity::toDomain)
+                .extracting(LatencyTelemetrySnapshot::faultType)
+                .containsExactly("request_drop", "request_drop");
     }
 
     private static final class MutableClock extends Clock {

@@ -30,7 +30,15 @@ public class ChaosRunEntity {
 
     private Integer latencyMilliseconds;
 
+    private Integer latencyJitterMilliseconds;
+
+    private Integer latencyMinimumMilliseconds;
+
+    private Integer latencyMaximumMilliseconds;
+
     private Integer trafficPercentage;
+
+    private Integer dropPercentage;
 
     private UUID approvalId;
 
@@ -62,7 +70,11 @@ public class ChaosRunEntity {
                           String faultType,
                           long requestedDurationSeconds,
                           Integer latencyMilliseconds,
+                          Integer latencyJitterMilliseconds,
+                          Integer latencyMinimumMilliseconds,
+                          Integer latencyMaximumMilliseconds,
                           Integer trafficPercentage,
+                          Integer dropPercentage,
                           UUID approvalId,
                           ChaosRunStatus status,
                           Instant createdAt,
@@ -77,7 +89,11 @@ public class ChaosRunEntity {
         this.faultType = faultType;
         this.requestedDurationSeconds = requestedDurationSeconds;
         this.latencyMilliseconds = latencyMilliseconds;
+        this.latencyJitterMilliseconds = latencyJitterMilliseconds;
+        this.latencyMinimumMilliseconds = latencyMinimumMilliseconds;
+        this.latencyMaximumMilliseconds = latencyMaximumMilliseconds;
         this.trafficPercentage = trafficPercentage;
+        this.dropPercentage = dropPercentage;
         this.approvalId = approvalId;
         this.status = status;
         this.createdAt = createdAt;
@@ -111,7 +127,11 @@ public class ChaosRunEntity {
                 faultType,
                 requestedDurationSeconds,
                 latencyMilliseconds,
+                latencyJitterMilliseconds,
+                latencyMinimumMilliseconds,
+                latencyMaximumMilliseconds,
                 trafficPercentage,
+                dropPercentage,
                 approvalId,
                 status,
                 createdAt,

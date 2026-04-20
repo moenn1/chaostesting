@@ -66,7 +66,16 @@ curl -s -X POST \
   -H 'X-Chaos-Dev-User: operator-demo' \
   -H 'X-Chaos-Dev-Roles: OPERATOR' \
   http://localhost:8080/safety/dispatches/validate \
-  -d '{"targetEnvironment":"staging","targetSelector":"checkout-service","faultType":"latency","requestedDurationSeconds":120}'
+  -d '{
+    "targetEnvironment":"staging",
+    "targetSelector":"checkout-service",
+    "faultType":"latency",
+    "requestedDurationSeconds":120,
+    "latencyMilliseconds":350,
+    "latencyJitterMilliseconds":40,
+    "trafficPercentage":30,
+    "requestedBy":"operator-demo"
+  }'
 ```
 
 ```bash
@@ -101,6 +110,26 @@ curl -s -X POST \
     }
   }'
 ```
+
+Traffic-shaping run dispatches now support both probabilistic latency and request-drop payloads:
+
+```bash
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/safety/dispatches \
+  -d '{
+    "targetEnvironment":"staging",
+    "targetSelector":"edge-gateway",
+    "faultType":"request_drop",
+    "requestedDurationSeconds":180,
+    "dropPercentage":12,
+    "requestedBy":"operator-demo"
+  }'
+```
+
+For random latency envelopes, either use `latencyMilliseconds` with `latencyJitterMilliseconds` or use `latencyMinimumMilliseconds` plus `latencyMaximumMilliseconds`.
 
 The full role-to-route matrix and OIDC mapping notes are documented in `docs/security-auth.md`.
 

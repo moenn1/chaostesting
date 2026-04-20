@@ -6,9 +6,14 @@ import java.util.UUID;
 public record LatencyTelemetrySnapshotResponse(
         UUID id,
         UUID runId,
+        String faultType,
         LatencyTelemetryPhase phase,
         int latencyMilliseconds,
+        Integer latencyJitterMilliseconds,
+        Integer latencyMinimumMilliseconds,
+        Integer latencyMaximumMilliseconds,
         int trafficPercentage,
+        Integer dropPercentage,
         boolean rollbackVerified,
         String message,
         Instant capturedAt
@@ -17,9 +22,14 @@ public record LatencyTelemetrySnapshotResponse(
         return new LatencyTelemetrySnapshotResponse(
                 snapshot.id(),
                 snapshot.runId(),
+                snapshot.faultType(),
                 snapshot.phase(),
                 snapshot.latencyMilliseconds(),
+                snapshot.latencyJitterMilliseconds(),
+                snapshot.latencyMinimumMilliseconds(),
+                snapshot.latencyMaximumMilliseconds(),
                 snapshot.trafficPercentage(),
+                snapshot.dropPercentage(),
                 snapshot.rollbackVerified(),
                 snapshot.message(),
                 snapshot.capturedAt()

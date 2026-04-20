@@ -48,7 +48,8 @@ class SafetyGuardrailsServiceTest {
         when(killSwitchService.isEnabled()).thenReturn(true);
 
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("staging", "checkout", "latency", 120, 250, 30, null, "operator-a")
+                new RunDispatchRequest("staging", "checkout", "latency", 120, 250, null, null, null, 30, null, null,
+                        "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -59,7 +60,8 @@ class SafetyGuardrailsServiceTest {
     @Test
     void rejectsEnvironmentOutsideAllowlist() {
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("qa", "payments", "latency", 60, 250, 30, null, "operator-a")
+                new RunDispatchRequest("qa", "payments", "latency", 60, 250, null, null, null, 30, null, null,
+                        "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -73,7 +75,8 @@ class SafetyGuardrailsServiceTest {
         properties.setControlledEnvironments(List.of("prod"));
 
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("prod", "payments", "latency", 60, 250, 30, null, "operator-a")
+                new RunDispatchRequest("prod", "payments", "latency", 60, 250, null, null, null, 30, null, null,
+                        "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -87,7 +90,8 @@ class SafetyGuardrailsServiceTest {
     @Test
     void marksProductionLikeDispatchesAsApprovalRequired() {
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("prod", "checkout", "http_error", 120, null, null, null, "operator-a")
+                new RunDispatchRequest("prod", "checkout", "http_error", 120, null, null, null, null, null, null, null,
+                        "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.APPROVAL_REQUIRED);
@@ -99,7 +103,8 @@ class SafetyGuardrailsServiceTest {
     @Test
     void rejectsDispatchesThatExceedMaxDuration() {
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("staging", "checkout", "latency", 60 * 20L, 250, 30, null, "operator-a")
+                new RunDispatchRequest("staging", "checkout", "latency", 60 * 20L, 250, null, null, null, 30, null, null,
+                        "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -113,7 +118,8 @@ class SafetyGuardrailsServiceTest {
         when(dispatchApprovalService.isActiveFor(approvalId, "prod")).thenReturn(true);
 
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("prod", "checkout", "latency", 120, 250, 30, approvalId, "operator-a")
+                new RunDispatchRequest("prod", "checkout", "latency", 120, 250, null, null, null, 30, null, approvalId,
+                        "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.ALLOWED);
@@ -126,7 +132,8 @@ class SafetyGuardrailsServiceTest {
         when(dispatchApprovalService.isActiveFor(approvalId, "prod")).thenReturn(false);
 
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("prod", "checkout", "latency", 120, 250, 30, approvalId, "operator-a")
+                new RunDispatchRequest("prod", "checkout", "latency", 120, 250, null, null, null, 30, null, approvalId,
+                        "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -137,7 +144,8 @@ class SafetyGuardrailsServiceTest {
     @Test
     void rejectsLatencyDispatchWithoutLatencyAmountOrTrafficScope() {
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("staging", "checkout", "latency", 120, null, null, null, "operator-a")
+                new RunDispatchRequest("staging", "checkout", "latency", 120, null, null, null, null, null, null, null,
+                        "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
@@ -151,12 +159,74 @@ class SafetyGuardrailsServiceTest {
     @Test
     void rejectsLatencyDispatchThatExceedsConfiguredLatencyCeiling() {
         DispatchValidationResponse response = safetyGuardrailsService.validate(
-                new RunDispatchRequest("staging", "checkout", "latency", 120, 6000, 30, null, "operator-a")
+                new RunDispatchRequest("staging", "checkout", "latency", 120, 6000, null, null, null, 30, null, null,
+                        "operator-a")
         );
 
         assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
         assertThat(response.maxLatencyMilliseconds()).isEqualTo(5000);
         assertThat(response.violations()).extracting(GuardrailViolation::code)
                 .containsExactly(GuardrailViolationCode.LATENCY_AMOUNT_EXCEEDED);
+    }
+
+    @Test
+    void allowsLatencyDispatchWithJitter() {
+        DispatchValidationResponse response = safetyGuardrailsService.validate(
+                new RunDispatchRequest("staging", "checkout", "latency", 120, 250, 50, null, null, 30, null, null,
+                        "operator-a")
+        );
+
+        assertThat(response.decision()).isEqualTo(DispatchDecision.ALLOWED);
+        assertThat(response.latencyJitterMilliseconds()).isEqualTo(50);
+        assertThat(response.violations()).isEmpty();
+    }
+
+    @Test
+    void allowsLatencyDispatchWithBounds() {
+        DispatchValidationResponse response = safetyGuardrailsService.validate(
+                new RunDispatchRequest("staging", "checkout", "latency", 120, null, null, 100, 300, 30, null, null,
+                        "operator-a")
+        );
+
+        assertThat(response.decision()).isEqualTo(DispatchDecision.ALLOWED);
+        assertThat(response.latencyMinimumMilliseconds()).isEqualTo(100);
+        assertThat(response.latencyMaximumMilliseconds()).isEqualTo(300);
+        assertThat(response.violations()).isEmpty();
+    }
+
+    @Test
+    void rejectsLatencyDispatchWhenBoundsAndFixedLatencyAreMixed() {
+        DispatchValidationResponse response = safetyGuardrailsService.validate(
+                new RunDispatchRequest("staging", "checkout", "latency", 120, 250, null, 100, 300, 30, null, null,
+                        "operator-a")
+        );
+
+        assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
+        assertThat(response.violations()).extracting(GuardrailViolation::code)
+                .contains(GuardrailViolationCode.LATENCY_CONFIGURATION_CONFLICT);
+    }
+
+    @Test
+    void rejectsRequestDropDispatchWithoutDropPercentage() {
+        DispatchValidationResponse response = safetyGuardrailsService.validate(
+                new RunDispatchRequest("staging", "checkout", "request_drop", 120, null, null, null, null, null, null,
+                        null, "operator-a")
+        );
+
+        assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
+        assertThat(response.violations()).extracting(GuardrailViolation::code)
+                .containsExactly(GuardrailViolationCode.DROP_PERCENTAGE_REQUIRED);
+    }
+
+    @Test
+    void allowsRequestDropDispatchWithinSupportedPercentageRange() {
+        DispatchValidationResponse response = safetyGuardrailsService.validate(
+                new RunDispatchRequest("staging", "checkout", "request_drop", 120, null, null, null, null, null, 15,
+                        null, "operator-a")
+        );
+
+        assertThat(response.decision()).isEqualTo(DispatchDecision.ALLOWED);
+        assertThat(response.dropPercentage()).isEqualTo(15);
+        assertThat(response.violations()).isEmpty();
     }
 }

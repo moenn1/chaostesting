@@ -5,6 +5,7 @@ All notable changes to this project are tracked in this file.
 ## Unreleased
 
 - MYG-38: added GitHub Actions quality gates for backend verification, static UI smoke checks, and docs/changelog enforcement on pull requests and `main`; added a mainline artifact upload job plus a `make ci-local` wrapper for local pre-push verification.
+- Added `MYG-50` traffic-shaping fault support for jittered or bounded latency profiles plus request-drop runs, including guardrail validation, run telemetry, rollback metadata, and experiment template validation for the new parameter shapes.
 - Added `MYG-4` experiment CRUD APIs with structured selector, fault, safety-rule, and environment metadata payloads plus field-level validation for invalid durations, unsupported fault parameters, and incomplete target selectors.
 - MYG-28: standardized the local developer workflow around Docker Compose for PostgreSQL, Redis, and RabbitMQ; verified bootstrap seeding for sample agents; and added reset, health-check, and troubleshooting documentation. Testing note: run `make test-local`, then use `make bootstrap-local` and `make local-health` for the local stack smoke check.
 - Added OIDC-backed login and explicit viewer/operator/approver/admin RBAC for the control plane.

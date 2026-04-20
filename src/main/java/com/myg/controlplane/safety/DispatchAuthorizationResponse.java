@@ -11,7 +11,11 @@ public record DispatchAuthorizationResponse(
         String faultType,
         long requestedDurationSeconds,
         Integer latencyMilliseconds,
+        Integer latencyJitterMilliseconds,
+        Integer latencyMinimumMilliseconds,
+        Integer latencyMaximumMilliseconds,
         Integer trafficPercentage,
+        Integer dropPercentage,
         UUID approvalId,
         Instant authorizedAt
 ) {

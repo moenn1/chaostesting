@@ -13,7 +13,11 @@ public record RunDispatchRequest(
         @NotBlank String faultType,
         @Positive long requestedDurationSeconds,
         @PositiveOrZero Integer latencyMilliseconds,
+        @PositiveOrZero Integer latencyJitterMilliseconds,
+        @PositiveOrZero Integer latencyMinimumMilliseconds,
+        @PositiveOrZero Integer latencyMaximumMilliseconds,
         @PositiveOrZero Integer trafficPercentage,
+        @PositiveOrZero Integer dropPercentage,
         UUID approvalId,
         @NotBlank String requestedBy
 ) {

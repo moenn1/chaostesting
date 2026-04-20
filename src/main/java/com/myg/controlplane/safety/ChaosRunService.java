@@ -54,7 +54,11 @@ public class ChaosRunService {
                 authorization.faultType(),
                 authorization.requestedDurationSeconds(),
                 authorization.latencyMilliseconds(),
+                authorization.latencyJitterMilliseconds(),
+                authorization.latencyMinimumMilliseconds(),
+                authorization.latencyMaximumMilliseconds(),
                 authorization.trafficPercentage(),
+                authorization.dropPercentage(),
                 authorization.approvalId(),
                 ChaosRunStatus.ACTIVE,
                 authorization.authorizedAt(),
@@ -68,7 +72,7 @@ public class ChaosRunService {
         latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.injection(
                 entity.toDomain(),
                 authorization.authorizedAt(),
-                "Latency injection activated."
+                activationMessage(entity.toDomain())
         ));
         auditLogService.record(
                 SafetyAuditEventType.RUN_STARTED,
@@ -149,7 +153,7 @@ public class ChaosRunService {
             latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.injection(
                     run.toDomain(),
                     clock.instant(),
-                    "Latency injection remains active."
+                    activeTelemetryMessage(run.toDomain())
             ));
         });
     }
@@ -209,7 +213,7 @@ public class ChaosRunService {
         latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.rollback(
                 entity.toDomain(),
                 rollbackVerifiedAt,
-                "Rollback verified after stop."
+                rollbackTelemetryMessage(entity.toDomain())
         ));
         auditLogService.record(
                 SafetyAuditEventType.RUN_ROLLBACK_VERIFIED,
@@ -269,13 +273,63 @@ public class ChaosRunService {
         if (run.latencyMilliseconds() != null) {
             metadata.put("latencyMilliseconds", run.latencyMilliseconds());
         }
+        if (run.latencyJitterMilliseconds() != null) {
+            metadata.put("latencyJitterMilliseconds", run.latencyJitterMilliseconds());
+        }
+        if (run.latencyMinimumMilliseconds() != null) {
+            metadata.put("latencyMinimumMilliseconds", run.latencyMinimumMilliseconds());
+        }
+        if (run.latencyMaximumMilliseconds() != null) {
+            metadata.put("latencyMaximumMilliseconds", run.latencyMaximumMilliseconds());
+        }
         if (run.trafficPercentage() != null) {
             metadata.put("trafficPercentage", run.trafficPercentage());
+        }
+        if (run.dropPercentage() != null) {
+            metadata.put("dropPercentage", run.dropPercentage());
         }
         if (run.approvalId() != null) {
             metadata.put("approvalId", run.approvalId().toString());
         }
         return metadata;
+    }
+
+    private String activationMessage(ChaosRun run) {
+        return faultSummary(run) + " activated.";
+    }
+
+    private String activeTelemetryMessage(ChaosRun run) {
+        return faultSummary(run) + " remains active.";
+    }
+
+    private String rollbackTelemetryMessage(ChaosRun run) {
+        return "Rollback verified after stopping " + faultSummary(run).toLowerCase() + ".";
+    }
+
+    private String faultSummary(ChaosRun run) {
+        return switch (run.faultType()) {
+            case "request_drop" -> "Request-drop injection at %s%%".formatted(run.dropPercentage());
+            case "latency" -> latencySummary(run);
+            default -> "Fault '" + run.faultType() + "'";
+        };
+    }
+
+    private String latencySummary(ChaosRun run) {
+        String trafficSummary = run.trafficPercentage() == null
+                ? "traffic"
+                : run.trafficPercentage() + "% of traffic";
+        if (run.latencyMinimumMilliseconds() != null && run.latencyMaximumMilliseconds() != null) {
+            return "Random latency between %sms and %sms across %s"
+                    .formatted(run.latencyMinimumMilliseconds(), run.latencyMaximumMilliseconds(), trafficSummary);
+        }
+        if (run.latencyJitterMilliseconds() != null && run.latencyMilliseconds() != null) {
+            return "Latency %sms +/- %sms across %s"
+                    .formatted(run.latencyMilliseconds(), run.latencyJitterMilliseconds(), trafficSummary);
+        }
+        if (run.latencyMilliseconds() != null) {
+            return "Latency %sms across %s".formatted(run.latencyMilliseconds(), trafficSummary);
+        }
+        return "Latency fault across %s".formatted(trafficSummary);
     }
 
     private record RunScheduleHandle(ScheduledFuture<?> telemetryFuture, ScheduledFuture<?> rollbackFuture) {

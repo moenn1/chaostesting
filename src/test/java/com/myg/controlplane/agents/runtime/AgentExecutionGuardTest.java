@@ -59,7 +59,11 @@ class AgentExecutionGuardTest {
                 "latency",
                 60 * 20L,
                 250,
+                null,
+                null,
+                null,
                 30,
+                null,
                 null
         );
 
@@ -78,8 +82,33 @@ class AgentExecutionGuardTest {
                 "latency",
                 300,
                 250,
+                25,
+                null,
+                null,
                 30,
+                null,
                 approvalId
+        );
+
+        assertThatCode(() -> agentExecutionGuard.verify(executionPlan))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void allowsRequestDropExecutionPlansWithinSafetyLimits() {
+        AgentExecutionPlan executionPlan = new AgentExecutionPlan(
+                UUID.randomUUID(),
+                "staging",
+                "checkout",
+                "request_drop",
+                180,
+                null,
+                null,
+                null,
+                null,
+                null,
+                10,
+                null
         );
 
         assertThatCode(() -> agentExecutionGuard.verify(executionPlan))

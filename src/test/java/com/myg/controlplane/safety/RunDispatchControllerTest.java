@@ -80,6 +80,108 @@ class RunDispatchControllerTest {
     }
 
     @Test
+    void validatesRandomLatencyDispatchesWithEitherJitterOrBounds() throws Exception {
+        mockMvc.perform(as(post("/safety/dispatches/validate"), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "checkout-service",
+                                  "faultType": "latency",
+                                  "requestedDurationSeconds": 120,
+                                  "latencyMilliseconds": 350,
+                                  "latencyJitterMilliseconds": 40,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "experiment-operator"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decision").value("ALLOWED"))
+                .andExpect(jsonPath("$.latencyJitterMilliseconds").value(40))
+                .andExpect(jsonPath("$.violations", hasSize(0)));
+
+        mockMvc.perform(as(post("/safety/dispatches/validate"), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "checkout-service",
+                                  "faultType": "latency",
+                                  "requestedDurationSeconds": 120,
+                                  "latencyMinimumMilliseconds": 120,
+                                  "latencyMaximumMilliseconds": 360,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "experiment-operator"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decision").value("ALLOWED"))
+                .andExpect(jsonPath("$.latencyMinimumMilliseconds").value(120))
+                .andExpect(jsonPath("$.latencyMaximumMilliseconds").value(360))
+                .andExpect(jsonPath("$.violations", hasSize(0)));
+    }
+
+    @Test
+    void authorizesAndStopsRequestDropRunsWithTelemetryAndAuditTrail() throws Exception {
+        MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "edge-gateway",
+                                  "faultType": "request_drop",
+                                  "requestedDurationSeconds": 120,
+                                  "dropPercentage": 12,
+                                  "requestedBy": "experiment-operator"
+                                }
+                                """))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.faultType").value("request_drop"))
+                .andExpect(jsonPath("$.dropPercentage").value(12))
+                .andReturn();
+
+        String runId = readField(dispatch.getResponse().getContentAsString(), "dispatchId");
+
+        mockMvc.perform(as(get("/safety/runs/{runId}/telemetry", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].faultType").value("request_drop"))
+                .andExpect(jsonPath("$[0].dropPercentage").value(12))
+                .andExpect(jsonPath("$[0].rollbackVerified").value(false));
+
+        clock.advanceSeconds(1);
+
+        mockMvc.perform(as(post("/safety/runs/{runId}/stop", runId), "ops-oncall", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "customer-impact containment"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ROLLED_BACK"))
+                .andExpect(jsonPath("$.faultType").value("request_drop"))
+                .andExpect(jsonPath("$.dropPercentage").value(12))
+                .andExpect(jsonPath("$.rollbackVerifiedAt").exists());
+
+        mockMvc.perform(as(get("/safety/runs/{runId}/telemetry", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].phase").value("ROLLBACK"))
+                .andExpect(jsonPath("$[0].faultType").value("request_drop"))
+                .andExpect(jsonPath("$[0].dropPercentage").value(12))
+                .andExpect(jsonPath("$[0].rollbackVerified").value(true));
+
+        mockMvc.perform(as(get("/safety/audit-records").param("resourceId", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(3)))
+                .andExpect(jsonPath("$[0].action").value("RUN_ROLLBACK_VERIFIED"))
+                .andExpect(jsonPath("$[0].metadata.dropPercentage").value(12))
+                .andExpect(jsonPath("$[2].action").value("RUN_STARTED"))
+                .andExpect(jsonPath("$[2].metadata.faultType").value("request_drop"));
+    }
+
+    @Test
     void requiresApprovalBeforeDispatchingIntoProductionLikeEnvironment() throws Exception {
         mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
