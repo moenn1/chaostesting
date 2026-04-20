@@ -31,13 +31,20 @@ CREATE INDEX IF NOT EXISTS idx_dispatch_approvals_environment_expires_at
 
 CREATE TABLE IF NOT EXISTS chaos_runs (
     id UUID PRIMARY KEY,
+    experiment_id UUID,
     target_environment VARCHAR(255) NOT NULL,
     target_selector VARCHAR(255) NOT NULL,
     fault_type VARCHAR(255) NOT NULL,
     requested_duration_seconds BIGINT NOT NULL,
-    approval_id UUID,
+    latency_milliseconds INTEGER,
+    traffic_percentage INTEGER,
+    approval_id UUID REFERENCES dispatch_approvals(id),
     status VARCHAR(64) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    rollback_scheduled_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    rollback_verified_at TIMESTAMP WITH TIME ZONE,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    target_snapshot_json TEXT,
     stop_command_issued_at TIMESTAMP WITH TIME ZONE,
     stop_command_issued_by VARCHAR(255),
     stop_command_reason VARCHAR(512)
@@ -45,6 +52,8 @@ CREATE TABLE IF NOT EXISTS chaos_runs (
 
 CREATE INDEX IF NOT EXISTS idx_chaos_runs_status_created_at ON chaos_runs(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_chaos_runs_environment_created_at ON chaos_runs(target_environment, created_at);
+CREATE INDEX IF NOT EXISTS idx_chaos_runs_experiment_status_started_at
+    ON chaos_runs(experiment_id, status, started_at);
 
 CREATE TABLE IF NOT EXISTS kill_switch_state (
     id BIGINT PRIMARY KEY,
@@ -76,6 +85,48 @@ CREATE INDEX IF NOT EXISTS idx_safety_audit_records_resource_recorded_at
     ON safety_audit_records(resource_type, resource_id, recorded_at);
 CREATE INDEX IF NOT EXISTS idx_safety_audit_records_run_recorded_at
     ON safety_audit_records(run_id, recorded_at);
+
+CREATE TABLE IF NOT EXISTS experiment_definitions (
+    id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description VARCHAR(2000) NOT NULL,
+    target_selector_json TEXT NOT NULL,
+    fault_config_json TEXT NOT NULL,
+    safety_rules_json TEXT NOT NULL,
+    environment_metadata_json TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_experiment_definitions_updated_at
+    ON experiment_definitions(updated_at, id);
+
+CREATE TABLE IF NOT EXISTS latency_telemetry_snapshots (
+    id UUID PRIMARY KEY,
+    run_id UUID NOT NULL REFERENCES chaos_runs(id) ON DELETE CASCADE,
+    phase VARCHAR(64) NOT NULL,
+    latency_milliseconds INTEGER NOT NULL,
+    traffic_percentage INTEGER NOT NULL,
+    rollback_verified BOOLEAN NOT NULL,
+    message VARCHAR(512) NOT NULL,
+    captured_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_latency_telemetry_snapshots_run_captured_at
+    ON latency_telemetry_snapshots(run_id, captured_at);
+
+CREATE TABLE IF NOT EXISTS run_lifecycle_events (
+    id UUID PRIMARY KEY,
+    run_id UUID NOT NULL REFERENCES chaos_runs(id) ON DELETE CASCADE,
+    event_type VARCHAR(64) NOT NULL,
+    actor VARCHAR(255) NOT NULL,
+    summary VARCHAR(512) NOT NULL,
+    details_json TEXT NOT NULL,
+    recorded_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_lifecycle_events_run_recorded_at
+    ON run_lifecycle_events(run_id, recorded_at);
 
 CREATE TABLE IF NOT EXISTS experiments (
     id UUID PRIMARY KEY,

@@ -1,10 +1,13 @@
 package com.myg.controlplane.safety;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
@@ -15,6 +18,8 @@ public class ChaosRunEntity {
 
     @Id
     private UUID id;
+
+    private UUID experimentId;
 
     @Column(nullable = false)
     private String targetEnvironment;
@@ -46,6 +51,12 @@ public class ChaosRunEntity {
 
     private Instant rollbackVerifiedAt;
 
+    @Column(nullable = false)
+    private Instant startedAt;
+
+    @Lob
+    private String targetSnapshotJson;
+
     private Instant stopCommandIssuedAt;
 
     private String stopCommandIssuedBy;
@@ -57,6 +68,7 @@ public class ChaosRunEntity {
     }
 
     public ChaosRunEntity(UUID id,
+                          UUID experimentId,
                           String targetEnvironment,
                           String targetSelector,
                           String faultType,
@@ -68,10 +80,13 @@ public class ChaosRunEntity {
                           Instant createdAt,
                           Instant rollbackScheduledAt,
                           Instant rollbackVerifiedAt,
+                          Instant startedAt,
+                          String targetSnapshotJson,
                           Instant stopCommandIssuedAt,
                           String stopCommandIssuedBy,
                           String stopCommandReason) {
         this.id = id;
+        this.experimentId = experimentId;
         this.targetEnvironment = targetEnvironment;
         this.targetSelector = targetSelector;
         this.faultType = faultType;
@@ -83,6 +98,8 @@ public class ChaosRunEntity {
         this.createdAt = createdAt;
         this.rollbackScheduledAt = rollbackScheduledAt;
         this.rollbackVerifiedAt = rollbackVerifiedAt;
+        this.startedAt = startedAt;
+        this.targetSnapshotJson = targetSnapshotJson;
         this.stopCommandIssuedAt = stopCommandIssuedAt;
         this.stopCommandIssuedBy = stopCommandIssuedBy;
         this.stopCommandReason = stopCommandReason;
@@ -103,9 +120,10 @@ public class ChaosRunEntity {
         rollbackVerifiedAt = now;
     }
 
-    public ChaosRun toDomain() {
+    public ChaosRun toDomain(ObjectMapper objectMapper) {
         return new ChaosRun(
                 id,
+                experimentId,
                 targetEnvironment,
                 targetSelector,
                 faultType,
@@ -117,9 +135,56 @@ public class ChaosRunEntity {
                 createdAt,
                 rollbackScheduledAt,
                 rollbackVerifiedAt,
+                startedAt,
+                readJson(objectMapper, targetSnapshotJson, RunTargetSnapshot.class),
                 stopCommandIssuedAt,
                 stopCommandIssuedBy,
                 stopCommandReason
         );
+    }
+
+    public ChaosRun toDomain() {
+        return new ChaosRun(
+                id,
+                experimentId,
+                targetEnvironment,
+                targetSelector,
+                faultType,
+                requestedDurationSeconds,
+                latencyMilliseconds,
+                trafficPercentage,
+                approvalId,
+                status,
+                createdAt,
+                rollbackScheduledAt,
+                rollbackVerifiedAt,
+                startedAt,
+                null,
+                stopCommandIssuedAt,
+                stopCommandIssuedBy,
+                stopCommandReason
+        );
+    }
+
+    public static String writeJson(ObjectMapper objectMapper, Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Failed to serialize chaos run payload", exception);
+        }
+    }
+
+    private static <T> T readJson(ObjectMapper objectMapper, String value, Class<T> type) {
+        if (objectMapper == null || value == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(value, type);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Failed to deserialize chaos run payload", exception);
+        }
     }
 }

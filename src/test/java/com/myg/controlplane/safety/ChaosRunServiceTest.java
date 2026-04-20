@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,6 +29,8 @@ class ChaosRunServiceTest {
     private final LatencyTelemetrySnapshotJpaRepository latencyTelemetrySnapshotJpaRepository =
             Mockito.mock(LatencyTelemetrySnapshotJpaRepository.class);
     private final AuditLogService auditLogService = Mockito.mock(AuditLogService.class);
+    private final RunLifecycleEventService runLifecycleEventService = Mockito.mock(RunLifecycleEventService.class);
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private final TaskScheduler taskScheduler = Mockito.mock(TaskScheduler.class);
 
     private final MutableClock clock = new MutableClock(Instant.parse("2026-04-20T16:00:00Z"), ZoneOffset.UTC);
@@ -59,6 +62,8 @@ class ChaosRunServiceTest {
                 chaosRunJpaRepository,
                 latencyTelemetrySnapshotJpaRepository,
                 auditLogService,
+                runLifecycleEventService,
+                objectMapper,
                 taskScheduler,
                 latencyInjectionProperties
         );

@@ -10,8 +10,8 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
-@Entity
-@Table(name = "experiments")
+@Entity(name = "StructuredExperimentEntity")
+@Table(name = "experiment_definitions")
 public class ExperimentEntity {
 
     @Id

@@ -26,12 +26,12 @@ public class ExperimentService {
     private static final Set<String> CONSUMER_PAUSE_PARAMETERS = Set.of("pauseSeconds");
     private static final Set<String> CONNECTION_CHURN_PARAMETERS = Set.of("connectionsPerSecond");
 
-    private final ExperimentJpaRepository experimentJpaRepository;
+    private final StructuredExperimentJpaRepository experimentJpaRepository;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final SafetyGuardrailsProperties safetyGuardrailsProperties;
 
-    public ExperimentService(ExperimentJpaRepository experimentJpaRepository,
+    public ExperimentService(StructuredExperimentJpaRepository experimentJpaRepository,
                              ObjectMapper objectMapper,
                              Clock clock,
                              SafetyGuardrailsProperties safetyGuardrailsProperties) {

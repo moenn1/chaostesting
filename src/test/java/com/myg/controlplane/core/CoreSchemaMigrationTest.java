@@ -28,6 +28,10 @@ class CoreSchemaMigrationTest {
 
         try (Connection connection = DriverManager.getConnection(url, "sa", "")) {
             assertThat(tableExists(connection, "agents")).isTrue();
+            assertThat(tableExists(connection, "chaos_runs")).isTrue();
+            assertThat(tableExists(connection, "experiment_definitions")).isTrue();
+            assertThat(tableExists(connection, "latency_telemetry_snapshots")).isTrue();
+            assertThat(tableExists(connection, "run_lifecycle_events")).isTrue();
             assertThat(tableExists(connection, "experiments")).isTrue();
             assertThat(tableExists(connection, "experiment_runs")).isTrue();
             assertThat(tableExists(connection, "fault_injection_actions")).isTrue();
@@ -49,6 +53,15 @@ class CoreSchemaMigrationTest {
 
             Set<String> telemetryIndexes = indexNames(connection, "telemetry_snapshots");
             assertThat(telemetryIndexes).contains("idx_telemetry_snapshots_run_captured_at");
+
+            Set<String> chaosRunIndexes = indexNames(connection, "chaos_runs");
+            assertThat(chaosRunIndexes).contains("idx_chaos_runs_experiment_status_started_at");
+
+            Set<String> latencyTelemetryIndexes = indexNames(connection, "latency_telemetry_snapshots");
+            assertThat(latencyTelemetryIndexes).contains("idx_latency_telemetry_snapshots_run_captured_at");
+
+            Set<String> lifecycleIndexes = indexNames(connection, "run_lifecycle_events");
+            assertThat(lifecycleIndexes).contains("idx_run_lifecycle_events_run_recorded_at");
 
             Set<String> auditIndexes = indexNames(connection, "audit_events");
             assertThat(auditIndexes).contains("idx_audit_events_run_occurred_at");

@@ -1,5 +1,6 @@
 package com.myg.controlplane.experiments;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -10,9 +11,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myg.controlplane.safety.ChaosRunJpaRepository;
+import com.myg.controlplane.safety.RunLifecycleEventJpaRepository;
+import com.myg.controlplane.safety.RunLifecycleEventType;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -45,6 +50,15 @@ class ExperimentControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private ChaosRunJpaRepository chaosRunJpaRepository;
+
+    @Autowired
+    private RunLifecycleEventJpaRepository runLifecycleEventJpaRepository;
 
     @Test
     void supportsExperimentCrudWithStructuredPayloads() throws Exception {
@@ -145,6 +159,125 @@ class ExperimentControllerTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    void startsManualRunWithPersistedTargetSnapshotAndLifecycleEvent() throws Exception {
+        mockMvc.perform(post("/agents/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "agent-phx-1",
+                                  "hostname": "phx-node-1.internal",
+                                  "environment": "staging",
+                                  "region": "us-phoenix-1",
+                                  "supportedFaultCapabilities": ["latency", "http_error"]
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/agents/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "agent-ashburn-1",
+                                  "hostname": "iad-node-1.internal",
+                                  "environment": "staging",
+                                  "region": "us-ashburn-1",
+                                  "supportedFaultCapabilities": ["latency"]
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        String experimentId = createExperiment();
+
+        MvcResult runStart = mockMvc.perform(as(post("/api/experiments/{experimentId}/runs", experimentId),
+                        "operator-demo", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.experimentId").value(experimentId))
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.startedAt").value("2026-04-20T18:00:00Z"))
+                .andExpect(jsonPath("$.targetEnvironment").value("staging"))
+                .andExpect(jsonPath("$.targetSelector").value(containsString("service=checkout-api")))
+                .andExpect(jsonPath("$.targetSnapshot.services", hasSize(1)))
+                .andExpect(jsonPath("$.targetSnapshot.services[0]").value("checkout-api"))
+                .andExpect(jsonPath("$.targetSnapshot.selector.labels.lane").value("canary"))
+                .andExpect(jsonPath("$.targetSnapshot.environment.region").value("us-phoenix-1"))
+                .andExpect(jsonPath("$.targetSnapshot.assignedAgents", hasSize(1)))
+                .andExpect(jsonPath("$.targetSnapshot.assignedAgents[0].name").value("agent-phx-1"))
+                .andExpect(jsonPath("$.targetSnapshot.assignedAgents[0].supportedFaultCapabilities[0]").value("http_error"))
+                .andExpect(jsonPath("$.targetSnapshot.assignedAgents[0].supportedFaultCapabilities[1]").value("latency"))
+                .andReturn();
+
+        String runId = readField(runStart.getResponse().getContentAsString(), "id");
+
+        List<com.myg.controlplane.safety.ChaosRun> runs = chaosRunJpaRepository.findAll().stream()
+                .map(entity -> entity.toDomain(objectMapper))
+                .toList();
+        org.assertj.core.api.Assertions.assertThat(runs).hasSize(1);
+        org.assertj.core.api.Assertions.assertThat(runs.get(0).id()).hasToString(runId);
+        org.assertj.core.api.Assertions.assertThat(runs.get(0).targetSnapshot()).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(runs.get(0).targetSnapshot().assignedAgents()).hasSize(1);
+
+        List<com.myg.controlplane.safety.RunLifecycleEvent> lifecycleEvents = runLifecycleEventJpaRepository.findAll().stream()
+                .map(entity -> entity.toDomain(objectMapper))
+                .toList();
+        org.assertj.core.api.Assertions.assertThat(lifecycleEvents).hasSize(1);
+        org.assertj.core.api.Assertions.assertThat(lifecycleEvents.get(0).runId()).hasToString(runId);
+        org.assertj.core.api.Assertions.assertThat(lifecycleEvents.get(0).eventType()).isEqualTo(RunLifecycleEventType.RUN_STARTED);
+        org.assertj.core.api.Assertions.assertThat(lifecycleEvents.get(0).details()).containsEntry("experimentId", experimentId);
+    }
+
+    @Test
+    void duplicateManualRunRequestsReturnTheExistingActiveRunWithoutDuplicatingEvents() throws Exception {
+        mockMvc.perform(post("/agents/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "agent-phx-1",
+                                  "hostname": "phx-node-1.internal",
+                                  "environment": "staging",
+                                  "region": "us-phoenix-1",
+                                  "supportedFaultCapabilities": ["latency"]
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        String experimentId = createExperiment();
+
+        MvcResult firstStart = mockMvc.perform(as(post("/api/experiments/{experimentId}/runs", experimentId),
+                        "operator-demo", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String runId = readField(firstStart.getResponse().getContentAsString(), "id");
+
+        mockMvc.perform(as(post("/api/experiments/{experimentId}/runs", experimentId),
+                        "operator-demo", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(runId))
+                .andExpect(jsonPath("$.experimentId").value(experimentId));
+
+        org.assertj.core.api.Assertions.assertThat(chaosRunJpaRepository.findAll()).hasSize(1);
+        org.assertj.core.api.Assertions.assertThat(runLifecycleEventJpaRepository.findAll()).hasSize(1);
+    }
+
+    @Test
+    void rejectsManualRunWhenNoHealthyAgentsMatchTheTargetSnapshot() throws Exception {
+        String experimentId = createExperiment();
+
+        mockMvc.perform(as(post("/api/experiments/{experimentId}/runs", experimentId),
+                        "operator-demo", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.message").value(containsString("No healthy registered agents matched environment 'staging'")));
+    }
+
     @TestConfiguration
     static class ClockConfiguration {
 
@@ -166,6 +299,15 @@ class ExperimentControllerTest {
         return builder
                 .header(DEV_USER_HEADER, username)
                 .header(DEV_ROLES_HEADER, roles);
+    }
+
+    private String createExperiment() throws Exception {
+        MvcResult created = mockMvc.perform(as(post("/api/experiments"), "operator-demo", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(latencyExperimentPayload()))
+                .andExpect(status().isCreated())
+                .andReturn();
+        return readField(created.getResponse().getContentAsString(), "id");
     }
 
     private static String latencyExperimentPayload() {

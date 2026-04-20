@@ -1,5 +1,7 @@
 package com.myg.controlplane.safety;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myg.controlplane.experiments.Experiment;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -26,6 +28,8 @@ public class ChaosRunService {
     private final ChaosRunJpaRepository chaosRunJpaRepository;
     private final LatencyTelemetrySnapshotJpaRepository latencyTelemetrySnapshotJpaRepository;
     private final AuditLogService auditLogService;
+    private final RunLifecycleEventService runLifecycleEventService;
+    private final ObjectMapper objectMapper;
     private final TaskScheduler taskScheduler;
     private final LatencyInjectionProperties latencyInjectionProperties;
     private final ConcurrentMap<UUID, RunScheduleHandle> runtimeSchedules = new ConcurrentHashMap<>();
@@ -34,52 +38,67 @@ public class ChaosRunService {
                            ChaosRunJpaRepository chaosRunJpaRepository,
                            LatencyTelemetrySnapshotJpaRepository latencyTelemetrySnapshotJpaRepository,
                            AuditLogService auditLogService,
+                           RunLifecycleEventService runLifecycleEventService,
+                           ObjectMapper objectMapper,
                            TaskScheduler taskScheduler,
                            LatencyInjectionProperties latencyInjectionProperties) {
         this.clock = clock;
         this.chaosRunJpaRepository = chaosRunJpaRepository;
         this.latencyTelemetrySnapshotJpaRepository = latencyTelemetrySnapshotJpaRepository;
         this.auditLogService = auditLogService;
+        this.runLifecycleEventService = runLifecycleEventService;
+        this.objectMapper = objectMapper;
         this.taskScheduler = taskScheduler;
         this.latencyInjectionProperties = latencyInjectionProperties;
     }
 
     @Transactional
     public void startAuthorizedRun(DispatchAuthorizationResponse authorization, RunDispatchRequest request) {
-        Instant rollbackScheduledAt = authorization.authorizedAt().plusSeconds(authorization.requestedDurationSeconds());
-        ChaosRunEntity entity = new ChaosRunEntity(
-                authorization.dispatchId(),
-                authorization.targetEnvironment(),
-                authorization.targetSelector(),
-                authorization.faultType(),
-                authorization.requestedDurationSeconds(),
-                authorization.latencyMilliseconds(),
-                authorization.trafficPercentage(),
-                authorization.approvalId(),
-                ChaosRunStatus.ACTIVE,
-                authorization.authorizedAt(),
-                rollbackScheduledAt,
-                null,
-                null,
-                null,
-                null
-        );
-        chaosRunJpaRepository.save(entity);
-        latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.injection(
-                entity.toDomain(),
-                authorization.authorizedAt(),
-                "Latency injection activated."
-        ));
+        ChaosRun run = persistRun(authorization, null, null);
+        if (supportsLatencyTelemetry(run)) {
+            latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.injection(
+                    run,
+                    authorization.authorizedAt(),
+                    "Latency injection activated."
+            ));
+        }
         auditLogService.record(
                 SafetyAuditEventType.RUN_STARTED,
                 AuditResourceType.RUN,
-                authorization.dispatchId().toString(),
+                run.id().toString(),
                 request.requestedBy().trim(),
                 "Authorized chaos run for " + authorization.targetSelector(),
-                runMetadata(entity.toDomain(), authorization.authorizedAt()),
+                runMetadata(run, authorization.authorizedAt()),
                 authorization.authorizedAt()
         );
-        scheduleRuntime(entity.toDomain(), authorization.authorizedAt());
+        scheduleRuntime(run, authorization.authorizedAt());
+    }
+
+    @Transactional
+    public ChaosRun createManualRun(String requestedBy,
+                                    Experiment experiment,
+                                    DispatchAuthorizationResponse authorization,
+                                    RunTargetSnapshot targetSnapshot) {
+        ChaosRun run = persistRun(authorization, experiment.id(), targetSnapshot);
+        if (supportsLatencyTelemetry(run)) {
+            latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.injection(
+                    run,
+                    run.startedAt(),
+                    "Latency injection activated."
+            ));
+        }
+        auditLogService.record(
+                SafetyAuditEventType.RUN_STARTED,
+                AuditResourceType.RUN,
+                run.id().toString(),
+                requestedBy.trim(),
+                "Started manual run for experiment " + experiment.name(),
+                runMetadata(run, run.startedAt()),
+                run.startedAt()
+        );
+        runLifecycleEventService.recordRunStarted(run, requestedBy.trim(), experiment.name());
+        scheduleRuntime(run, run.startedAt());
+        return run;
     }
 
     @Transactional(readOnly = true)
@@ -88,14 +107,14 @@ public class ChaosRunService {
                 .map(chaosRunJpaRepository::findAllByStatusOrderByCreatedAtDescIdDesc)
                 .orElseGet(chaosRunJpaRepository::findAllByOrderByCreatedAtDescIdDesc);
         return entities.stream()
-                .map(ChaosRunEntity::toDomain)
+                .map(entity -> entity.toDomain(objectMapper))
                 .map(ChaosRunResponse::from)
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public ChaosRunResponse getRun(UUID runId) {
-        return ChaosRunResponse.from(loadRun(runId).toDomain());
+        return ChaosRunResponse.from(loadRun(runId).toDomain(objectMapper));
     }
 
     @Transactional(readOnly = true)
@@ -111,7 +130,7 @@ public class ChaosRunService {
     public ChaosRunResponse stopRun(UUID runId, String operator, String reason) {
         ChaosRunEntity entity = loadRun(runId);
         rollbackRun(entity, operator.trim(), reason.trim(), clock.instant());
-        return ChaosRunResponse.from(entity.toDomain());
+        return ChaosRunResponse.from(entity.toDomain(objectMapper));
     }
 
     @Transactional
@@ -128,11 +147,12 @@ public class ChaosRunService {
     @Transactional
     public void restoreRuntimeSchedules() {
         Instant now = clock.instant();
-        chaosRunJpaRepository.findAllByStatus(ChaosRunStatus.ACTIVE).forEach(run -> {
-            if (!run.toDomain().rollbackScheduledAt().isAfter(now)) {
-                rollbackRun(run, SYSTEM_OPERATOR, TIMEBOX_COMPLETED_REASON, now);
+        chaosRunJpaRepository.findAllByStatus(ChaosRunStatus.ACTIVE).forEach(runEntity -> {
+            ChaosRun run = runEntity.toDomain();
+            if (run.rollbackScheduledAt() == null || !run.rollbackScheduledAt().isAfter(now)) {
+                rollbackRun(runEntity, SYSTEM_OPERATOR, TIMEBOX_COMPLETED_REASON, now);
             } else {
-                scheduleRuntime(run.toDomain(), now);
+                scheduleRuntime(run, now);
             }
         });
         chaosRunJpaRepository.findAllByStatus(ChaosRunStatus.STOP_REQUESTED)
@@ -141,16 +161,19 @@ public class ChaosRunService {
 
     @Transactional
     void emitScheduledTelemetry(UUID runId) {
-        chaosRunJpaRepository.findById(runId).ifPresent(run -> {
-            if (run.toDomain().status() != ChaosRunStatus.ACTIVE) {
+        chaosRunJpaRepository.findById(runId).ifPresent(runEntity -> {
+            ChaosRun run = runEntity.toDomain();
+            if (run.status() != ChaosRunStatus.ACTIVE) {
                 cancelRuntime(runId);
                 return;
             }
-            latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.injection(
-                    run.toDomain(),
-                    clock.instant(),
-                    "Latency injection remains active."
-            ));
+            if (supportsLatencyTelemetry(run)) {
+                latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.injection(
+                        run,
+                        clock.instant(),
+                        "Latency injection remains active."
+                ));
+            }
         });
     }
 
@@ -167,9 +190,12 @@ public class ChaosRunService {
 
     private void scheduleRuntime(ChaosRun run, Instant scheduledFrom) {
         cancelRuntime(run.id());
+        if (run.rollbackScheduledAt() == null) {
+            return;
+        }
         Instant firstTelemetryAt = scheduledFrom.plus(latencyInjectionProperties.getTelemetryInterval());
         ScheduledFuture<?> telemetryFuture = null;
-        if (firstTelemetryAt.isBefore(run.rollbackScheduledAt())) {
+        if (supportsLatencyTelemetry(run) && firstTelemetryAt.isBefore(run.rollbackScheduledAt())) {
             telemetryFuture = taskScheduler.scheduleAtFixedRate(
                     () -> emitScheduledTelemetry(run.id()),
                     firstTelemetryAt,
@@ -184,21 +210,22 @@ public class ChaosRunService {
     }
 
     private void rollbackRun(ChaosRunEntity entity, String operator, String reason, Instant now) {
-        if (entity.toDomain().status() == ChaosRunStatus.ROLLED_BACK) {
-            cancelRuntime(entity.toDomain().id());
+        ChaosRun currentRun = entity.toDomain(objectMapper);
+        if (currentRun.status() == ChaosRunStatus.ROLLED_BACK) {
+            cancelRuntime(currentRun.id());
             return;
         }
 
-        cancelRuntime(entity.toDomain().id());
-        if (entity.toDomain().status() == ChaosRunStatus.ACTIVE) {
+        cancelRuntime(currentRun.id());
+        if (currentRun.status() == ChaosRunStatus.ACTIVE) {
             entity.markStopRequested(operator, reason, now);
             auditLogService.record(
                     SafetyAuditEventType.RUN_STOP_REQUESTED,
                     AuditResourceType.RUN,
-                    entity.toDomain().id().toString(),
+                    currentRun.id().toString(),
                     operator,
-                    "Stop requested for " + entity.toDomain().targetSelector(),
-                    runStopMetadata(entity.toDomain(), now),
+                    "Stop requested for " + currentRun.targetSelector(),
+                    runStopMetadata(currentRun, now),
                     now
             );
         }
@@ -206,18 +233,22 @@ public class ChaosRunService {
         Instant rollbackVerifiedAt = now.plusMillis(1);
         entity.markRolledBack(rollbackVerifiedAt);
         chaosRunJpaRepository.save(entity);
-        latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.rollback(
-                entity.toDomain(),
-                rollbackVerifiedAt,
-                "Rollback verified after stop."
-        ));
+
+        ChaosRun rolledBackRun = entity.toDomain(objectMapper);
+        if (supportsLatencyTelemetry(rolledBackRun)) {
+            latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.rollback(
+                    rolledBackRun,
+                    rollbackVerifiedAt,
+                    "Rollback verified after stop."
+            ));
+        }
         auditLogService.record(
                 SafetyAuditEventType.RUN_ROLLBACK_VERIFIED,
                 AuditResourceType.RUN,
-                entity.toDomain().id().toString(),
+                rolledBackRun.id().toString(),
                 operator,
-                "Rollback verified for " + entity.toDomain().targetSelector(),
-                rollbackMetadata(entity.toDomain(), rollbackVerifiedAt, reason),
+                "Rollback verified for " + rolledBackRun.targetSelector(),
+                rollbackMetadata(rolledBackRun, rollbackVerifiedAt, reason),
                 rollbackVerifiedAt
         );
     }
@@ -266,6 +297,10 @@ public class ChaosRunService {
         metadata.put("targetSelector", run.targetSelector());
         metadata.put("faultType", run.faultType());
         metadata.put("requestedDurationSeconds", run.requestedDurationSeconds());
+        metadata.put("startedAt", run.startedAt());
+        if (run.experimentId() != null) {
+            metadata.put("experimentId", run.experimentId().toString());
+        }
         if (run.latencyMilliseconds() != null) {
             metadata.put("latencyMilliseconds", run.latencyMilliseconds());
         }
@@ -275,7 +310,46 @@ public class ChaosRunService {
         if (run.approvalId() != null) {
             metadata.put("approvalId", run.approvalId().toString());
         }
+        if (run.targetSnapshot() != null) {
+            metadata.put("services", run.targetSnapshot().services());
+            metadata.put("assignedAgents", run.targetSnapshot().assignedAgents().stream()
+                    .map(RunAssignedAgent::id)
+                    .map(UUID::toString)
+                    .toList());
+        }
         return metadata;
+    }
+
+    private ChaosRun persistRun(DispatchAuthorizationResponse authorization,
+                                UUID experimentId,
+                                RunTargetSnapshot targetSnapshot) {
+        Instant startedAt = authorization.authorizedAt();
+        Instant rollbackScheduledAt = startedAt.plusSeconds(authorization.requestedDurationSeconds());
+        ChaosRunEntity entity = new ChaosRunEntity(
+                authorization.dispatchId(),
+                experimentId,
+                authorization.targetEnvironment(),
+                authorization.targetSelector(),
+                authorization.faultType(),
+                authorization.requestedDurationSeconds(),
+                authorization.latencyMilliseconds(),
+                authorization.trafficPercentage(),
+                authorization.approvalId(),
+                ChaosRunStatus.ACTIVE,
+                startedAt,
+                rollbackScheduledAt,
+                null,
+                startedAt,
+                ChaosRunEntity.writeJson(objectMapper, targetSnapshot),
+                null,
+                null,
+                null
+        );
+        return chaosRunJpaRepository.save(entity).toDomain(objectMapper);
+    }
+
+    private boolean supportsLatencyTelemetry(ChaosRun run) {
+        return "latency".equalsIgnoreCase(run.faultType());
     }
 
     private record RunScheduleHandle(ScheduledFuture<?> telemetryFuture, ScheduledFuture<?> rollbackFuture) {
