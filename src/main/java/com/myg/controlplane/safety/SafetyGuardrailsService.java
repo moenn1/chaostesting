@@ -53,8 +53,11 @@ public class SafetyGuardrailsService {
                 "AUTHORIZED",
                 response.targetEnvironment(),
                 request.targetSelector().trim(),
-                request.faultType().trim(),
+                request.normalizedFaultType(),
                 request.requestedDurationSeconds(),
+                request.errorCode(),
+                request.trafficPercentage(),
+                request.routeFilters(),
                 request.approvalId(),
                 clock.instant()
         );
@@ -85,6 +88,10 @@ public class SafetyGuardrailsService {
                     "Requested duration %ss exceeds the configured max of %ss."
                             .formatted(request.requestedDurationSeconds(), properties.getMaxDuration().toSeconds())
             ));
+        }
+
+        if ("http_error".equals(request.normalizedFaultType())) {
+            validateHttpErrorConfig(request, violations);
         }
 
         if (requiresApproval(normalizedEnvironment)) {
@@ -133,8 +140,17 @@ public class SafetyGuardrailsService {
         metadata.put("decision", response.decision().name());
         metadata.put("targetEnvironment", response.targetEnvironment());
         metadata.put("targetSelector", request.targetSelector().trim());
-        metadata.put("faultType", request.faultType().trim());
+        metadata.put("faultType", request.normalizedFaultType());
         metadata.put("requestedDurationSeconds", request.requestedDurationSeconds());
+        if (request.errorCode() != null) {
+            metadata.put("errorCode", request.errorCode());
+        }
+        if (request.trafficPercentage() != null) {
+            metadata.put("trafficPercentage", request.trafficPercentage());
+        }
+        if (!request.routeFilters().isEmpty()) {
+            metadata.put("routeFilters", request.routeFilters());
+        }
         if (request.approvalId() != null) {
             metadata.put("approvalId", request.approvalId().toString());
         }
@@ -145,5 +161,26 @@ public class SafetyGuardrailsService {
                 ))
                 .toList());
         return metadata;
+    }
+
+    private void validateHttpErrorConfig(RunDispatchRequest request, List<GuardrailViolation> violations) {
+        if (request.errorCode() == null) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.HTTP_ERROR_CODE_REQUIRED,
+                    "HTTP error injection requires an errorCode of 500 or 503."
+            ));
+        } else if (request.errorCode() != 500 && request.errorCode() != 503) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.HTTP_ERROR_CODE_UNSUPPORTED,
+                    "HTTP error injection supports only 500 and 503 status codes."
+            ));
+        }
+
+        if (request.trafficPercentage() == null) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.TRAFFIC_PERCENTAGE_REQUIRED,
+                    "HTTP error injection requires a trafficPercentage between 1 and 100."
+            ));
+        }
     }
 }

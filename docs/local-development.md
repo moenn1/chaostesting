@@ -61,6 +61,61 @@ If you start the app on a non-default port, pass the URL explicitly:
 APP_URL=http://localhost:8090 make local-health
 ```
 
+## Exercise HTTP Error Injection Locally
+
+Use the safety endpoints to validate, dispatch, report, and stop scoped HTTP error runs:
+
+```bash
+curl -s http://localhost:8080/safety/dispatches/validate \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "targetEnvironment": "staging",
+    "targetSelector": "checkout-service",
+    "faultType": "http_error",
+    "requestedDurationSeconds": 120,
+    "errorCode": 503,
+    "trafficPercentage": 30,
+    "routeFilters": ["/checkout"],
+    "requestedBy": "experiment-operator"
+  }'
+```
+
+Dispatch the run once validation is allowed:
+
+```bash
+curl -s http://localhost:8080/safety/dispatches \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "targetEnvironment": "staging",
+    "targetSelector": "checkout-service",
+    "faultType": "http_error",
+    "requestedDurationSeconds": 120,
+    "errorCode": 503,
+    "trafficPercentage": 30,
+    "routeFilters": ["/checkout"],
+    "requestedBy": "experiment-operator"
+  }'
+```
+
+Report the outcome from the runtime and then stop the run if needed:
+
+```bash
+curl -s http://localhost:8080/safety/runs/<run-id>/reports \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "state": "SUCCESS",
+    "reportedBy": "agent-eu-1",
+    "message": "Injected 503 responses for 30% of scoped traffic."
+  }'
+
+curl -s http://localhost:8080/safety/runs/<run-id>/stop \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "operator": "ops-oncall",
+    "reason": "customer-impact containment"
+  }'
+```
+
 ## Reset
 
 Blow away the local volumes and re-seed the stack from scratch:

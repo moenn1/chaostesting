@@ -51,6 +51,27 @@ make bootstrap-local
 
 Full step-by-step bootstrap, reset, and troubleshooting notes live in `docs/local-development.md`.
 
+## HTTP Error Injection
+
+The control plane now supports scoped HTTP error injection runs for `500` and `503` responses. Dispatches can set a traffic percentage plus optional route filters, and each run exposes stop and execution-report endpoints for success, failure, and rollback visibility.
+
+Example dispatch:
+
+```bash
+curl -s http://localhost:8080/safety/dispatches \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "targetEnvironment": "staging",
+    "targetSelector": "checkout-service",
+    "faultType": "http_error",
+    "requestedDurationSeconds": 120,
+    "errorCode": 503,
+    "trafficPercentage": 30,
+    "routeFilters": ["/checkout"],
+    "requestedBy": "experiment-operator"
+  }'
+```
+
 ## Default local endpoints
 
 - App: `http://localhost:8080`

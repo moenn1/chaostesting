@@ -4,7 +4,9 @@ import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,15 +21,18 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/safety")
 public class RunDispatchController {
 
+    private final ChaosRunDispatchService chaosRunDispatchService;
     private final ChaosRunService chaosRunService;
     private final DispatchApprovalService dispatchApprovalService;
     private final KillSwitchService killSwitchService;
     private final SafetyGuardrailsService safetyGuardrailsService;
 
-    public RunDispatchController(ChaosRunService chaosRunService,
+    public RunDispatchController(ChaosRunDispatchService chaosRunDispatchService,
+                                 ChaosRunService chaosRunService,
                                  DispatchApprovalService dispatchApprovalService,
                                  KillSwitchService killSwitchService,
                                  SafetyGuardrailsService safetyGuardrailsService) {
+        this.chaosRunDispatchService = chaosRunDispatchService;
         this.chaosRunService = chaosRunService;
         this.dispatchApprovalService = dispatchApprovalService;
         this.killSwitchService = killSwitchService;
@@ -48,12 +53,33 @@ public class RunDispatchController {
     @PostMapping("/dispatches")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public DispatchAuthorizationResponse authorize(@Valid @RequestBody RunDispatchRequest request) {
-        return chaosRunService.createRun(request);
+        return chaosRunDispatchService.createRun(request);
     }
 
     @GetMapping("/runs")
     public List<ChaosRunResponse> listRuns(@RequestParam Optional<String> status) {
         return chaosRunService.findAll(status.map(this::parseRunStatus));
+    }
+
+    @GetMapping("/runs/{runId}")
+    public ChaosRunResponse getRun(@PathVariable UUID runId) {
+        return chaosRunService.getRun(runId);
+    }
+
+    @GetMapping("/runs/{runId}/reports")
+    public List<RunExecutionReportResponse> listReports(@PathVariable UUID runId) {
+        return chaosRunService.findReports(runId);
+    }
+
+    @PostMapping("/runs/{runId}/reports")
+    public RunExecutionReportResponse reportRun(@PathVariable UUID runId,
+                                                @Valid @RequestBody RunExecutionReportRequest request) {
+        return chaosRunService.reportRun(runId, request);
+    }
+
+    @PostMapping("/runs/{runId}/stop")
+    public ChaosRunResponse stopRun(@PathVariable UUID runId, @Valid @RequestBody RunStopRequest request) {
+        return chaosRunService.stopRun(runId, request);
     }
 
     @GetMapping("/kill-switch")
@@ -75,6 +101,11 @@ public class RunDispatchController {
     @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
     public DispatchValidationResponse handleRejected(RunDispatchRejectedException exception) {
         return exception.getResponse();
+    }
+
+    @ExceptionHandler(ChaosRunNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public void handleRunNotFound() {
     }
 
     private ChaosRunStatus parseRunStatus(String rawStatus) {

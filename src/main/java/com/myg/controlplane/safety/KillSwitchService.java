@@ -2,8 +2,6 @@ package com.myg.controlplane.safety;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,15 +14,18 @@ public class KillSwitchService {
     private final Clock clock;
     private final KillSwitchStateJpaRepository killSwitchStateJpaRepository;
     private final ChaosRunJpaRepository chaosRunJpaRepository;
+    private final ChaosRunService chaosRunService;
     private final AuditLogService auditLogService;
 
     public KillSwitchService(Clock clock,
                              KillSwitchStateJpaRepository killSwitchStateJpaRepository,
                              ChaosRunJpaRepository chaosRunJpaRepository,
+                             ChaosRunService chaosRunService,
                              AuditLogService auditLogService) {
         this.clock = clock;
         this.killSwitchStateJpaRepository = killSwitchStateJpaRepository;
         this.chaosRunJpaRepository = chaosRunJpaRepository;
+        this.chaosRunService = chaosRunService;
         this.auditLogService = auditLogService;
     }
 
@@ -35,7 +36,7 @@ public class KillSwitchService {
 
     @Transactional(readOnly = true)
     public KillSwitchStatusResponse getStatus() {
-        return statusResponse(currentState());
+        return statusResponse(currentState(), 0);
     }
 
     @Transactional
@@ -47,8 +48,7 @@ public class KillSwitchService {
         KillSwitchStateEntity stateEntity = loadOrCreate(now);
         stateEntity.enable(operator, reason, now);
 
-        List<ChaosRunEntity> activeRuns = chaosRunJpaRepository.findAllByStatus(ChaosRunStatus.ACTIVE);
-        activeRuns.forEach(run -> run.markStopRequested(operator, reason, now));
+        long stopRequestsIssued = chaosRunService.stopActiveRuns(operator, reason);
 
         killSwitchStateJpaRepository.save(stateEntity);
         auditLogService.record(
@@ -57,23 +57,11 @@ public class KillSwitchService {
                 "global",
                 operator,
                 reason,
-                Map.of("affectedActiveRunCount", activeRuns.size(), "enabledAt", now),
+                Map.of("affectedActiveRunCount", stopRequestsIssued, "enabledAt", now),
                 now
         );
-        for (int index = 0; index < activeRuns.size(); index++) {
-            ChaosRun run = activeRuns.get(index).toDomain();
-            auditLogService.record(
-                    SafetyAuditEventType.RUN_STOP_REQUESTED,
-                    AuditResourceType.RUN,
-                    run.id().toString(),
-                    operator,
-                    reason,
-                    runStopMetadata(run, now),
-                    now.plusMillis(index + 1L)
-            );
-        }
 
-        return statusResponse(stateEntity.toDomain());
+        return statusResponse(stateEntity.toDomain(), stopRequestsIssued);
     }
 
     @Transactional
@@ -95,7 +83,7 @@ public class KillSwitchService {
                 now
         );
 
-        return statusResponse(stateEntity.toDomain());
+        return statusResponse(stateEntity.toDomain(), 0);
     }
 
     private KillSwitchState currentState() {
@@ -109,24 +97,13 @@ public class KillSwitchService {
                 .orElseGet(() -> new KillSwitchStateEntity(GLOBAL_KILL_SWITCH_ID, false, now));
     }
 
-    private KillSwitchStatusResponse statusResponse(KillSwitchState state) {
+    private KillSwitchStatusResponse statusResponse(KillSwitchState state, long stopRequestsIssued) {
         return KillSwitchStatusResponse.from(
                 state,
                 chaosRunJpaRepository.countByStatus(ChaosRunStatus.ACTIVE),
-                chaosRunJpaRepository.countByStatus(ChaosRunStatus.STOP_REQUESTED)
+                chaosRunJpaRepository.countByStatus(ChaosRunStatus.STOP_REQUESTED),
+                chaosRunJpaRepository.countByStatus(ChaosRunStatus.ROLLED_BACK),
+                stopRequestsIssued
         );
-    }
-
-    private Map<String, Object> runStopMetadata(ChaosRun run, Instant stopRequestedAt) {
-        Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.put("targetEnvironment", run.targetEnvironment());
-        metadata.put("targetSelector", run.targetSelector());
-        metadata.put("faultType", run.faultType());
-        metadata.put("requestedDurationSeconds", run.requestedDurationSeconds());
-        if (run.approvalId() != null) {
-            metadata.put("approvalId", run.approvalId().toString());
-        }
-        metadata.put("stopRequestedAt", stopRequestedAt);
-        return metadata;
     }
 }
