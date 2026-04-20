@@ -14,3 +14,19 @@ spring:
 
 agent-registry:
   stale-after: 30s
+
+chaos:
+  guardrails:
+    environment-policy-mode: allowlist
+    controlled-environments:
+      - local
+      - dev
+      - staging
+      - prod
+      - prod-shadow
+    production-like-environments:
+      - prod
+      - production
+      - prod-shadow
+    max-duration: 15m
+    approval-ttl: 30m
