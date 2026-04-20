@@ -61,6 +61,52 @@ If you start the app on a non-default port, pass the URL explicitly:
 APP_URL=http://localhost:8090 make local-health
 ```
 
+## Experiment API Smoke Check
+
+After the app is running, create an experiment template with the local dev auth headers:
+
+```bash
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/api/experiments \
+  -d '{
+    "name":"Catalog CPU saturation",
+    "description":"Burn CPU in a single catalog pod before widening the blast radius.",
+    "targetSelector":{
+      "service":"catalog-api",
+      "namespace":"shop",
+      "cluster":"staging-west"
+    },
+    "faultConfig":{
+      "type":"cpu",
+      "durationSeconds":360,
+      "parameters":{"cpuLoadPercent":75}
+    },
+    "safetyRules":{
+      "abortConditions":["Abort if checkout p95 exceeds 400ms"],
+      "maxAffectedTargets":1,
+      "approvalRequired":false,
+      "rollbackMode":"automatic"
+    },
+    "environmentMetadata":{
+      "environment":"staging",
+      "region":"us-phoenix-1",
+      "team":"shop-platform"
+    }
+  }'
+```
+
+List the stored experiments as a viewer:
+
+```bash
+curl -s \
+  -H 'X-Chaos-Dev-User: viewer-demo' \
+  -H 'X-Chaos-Dev-Roles: VIEWER' \
+  http://localhost:8080/api/experiments
+```
+
 ## Reset
 
 Blow away the local volumes and re-seed the stack from scratch:

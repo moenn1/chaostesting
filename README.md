@@ -18,8 +18,8 @@ The default claim mapping expects:
 
 Route permissions are enforced consistently across the control plane:
 
-- `VIEWER`: dashboard and static UI routes, `/auth/me`, audit history, run status, kill-switch status, and agent read APIs.
-- `OPERATOR`: dispatch validation, run authorization, and `/safety/runs/{runId}/stop`.
+- `VIEWER`: dashboard and static UI routes, `/auth/me`, audit history, run status, kill-switch status, agent read APIs, and `GET /api/experiments`.
+- `OPERATOR`: experiment CRUD writes, dispatch validation, run authorization, and `/safety/runs/{runId}/stop`.
 - `APPROVER`: `/safety/approvals`.
 - `ADMIN`: kill-switch enable and disable, plus all viewer/operator/approver capabilities.
 
@@ -67,6 +67,39 @@ curl -s -X POST \
   -H 'X-Chaos-Dev-Roles: OPERATOR' \
   http://localhost:8080/safety/dispatches/validate \
   -d '{"targetEnvironment":"staging","targetSelector":"checkout-service","faultType":"latency","requestedDurationSeconds":120}'
+```
+
+```bash
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/api/experiments \
+  -d '{
+    "name":"Checkout latency envelope",
+    "description":"Inject 350ms latency into a guarded checkout canary.",
+    "targetSelector":{
+      "service":"checkout-api",
+      "namespace":"payments",
+      "labels":{"lane":"canary"}
+    },
+    "faultConfig":{
+      "type":"latency",
+      "durationSeconds":480,
+      "parameters":{"latencyMs":350,"percentage":30}
+    },
+    "safetyRules":{
+      "abortConditions":["Abort if 5xx exceeds 2.5% for 90 seconds"],
+      "maxAffectedTargets":2,
+      "approvalRequired":false,
+      "rollbackMode":"automatic"
+    },
+    "environmentMetadata":{
+      "environment":"staging",
+      "region":"us-phoenix-1",
+      "team":"payments"
+    }
+  }'
 ```
 
 The full role-to-route matrix and OIDC mapping notes are documented in `docs/security-auth.md`.

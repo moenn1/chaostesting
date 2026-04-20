@@ -60,6 +60,8 @@ Or, if the headers are absent, the configured default local user.
 - `GET /results/**`
 - `GET /history/**`
 - `GET /agents/**`
+- `GET /api/experiments`
+- `GET /api/experiments/{experimentId}`
 - `GET /audit/events`
 - `GET /safety/audit-records`
 - `GET /safety/runs`
@@ -68,6 +70,9 @@ Or, if the headers are absent, the configured default local user.
 
 ### Operator
 
+- `POST /api/experiments`
+- `PUT /api/experiments/{experimentId}`
+- `DELETE /api/experiments/{experimentId}`
 - `POST /safety/dispatches/validate`
 - `POST /safety/dispatches`
 - `POST /safety/runs/{runId}/stop`
