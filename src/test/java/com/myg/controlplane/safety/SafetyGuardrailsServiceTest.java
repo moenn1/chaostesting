@@ -15,6 +15,7 @@ import org.mockito.Mockito;
 class SafetyGuardrailsServiceTest {
 
     private final DispatchApprovalService dispatchApprovalService = Mockito.mock(DispatchApprovalService.class);
+    private final KillSwitchService killSwitchService = Mockito.mock(KillSwitchService.class);
 
     private SafetyGuardrailsProperties properties;
     private SafetyGuardrailsService safetyGuardrailsService;
@@ -29,8 +30,23 @@ class SafetyGuardrailsServiceTest {
         safetyGuardrailsService = new SafetyGuardrailsService(
                 Clock.fixed(Instant.parse("2026-04-20T16:00:00Z"), ZoneOffset.UTC),
                 properties,
-                dispatchApprovalService
+                dispatchApprovalService,
+                killSwitchService
         );
+        when(killSwitchService.isEnabled()).thenReturn(false);
+    }
+
+    @Test
+    void rejectsDispatchesWhileKillSwitchIsEnabled() {
+        when(killSwitchService.isEnabled()).thenReturn(true);
+
+        DispatchValidationResponse response = safetyGuardrailsService.validate(
+                new RunDispatchRequest("staging", "checkout", "latency", 120, null)
+        );
+
+        assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
+        assertThat(response.violations()).extracting(GuardrailViolation::code)
+                .containsExactly(GuardrailViolationCode.KILL_SWITCH_ACTIVE);
     }
 
     @Test

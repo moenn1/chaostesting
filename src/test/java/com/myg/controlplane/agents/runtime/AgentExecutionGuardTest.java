@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import com.myg.controlplane.safety.DispatchApprovalService;
 import com.myg.controlplane.safety.EnvironmentPolicyMode;
+import com.myg.controlplane.safety.KillSwitchService;
 import com.myg.controlplane.safety.SafetyGuardrailsProperties;
 import com.myg.controlplane.safety.SafetyGuardrailsService;
 import java.time.Clock;
@@ -21,6 +22,7 @@ import org.mockito.Mockito;
 class AgentExecutionGuardTest {
 
     private final DispatchApprovalService dispatchApprovalService = Mockito.mock(DispatchApprovalService.class);
+    private final KillSwitchService killSwitchService = Mockito.mock(KillSwitchService.class);
 
     private AgentExecutionGuard agentExecutionGuard;
 
@@ -34,8 +36,10 @@ class AgentExecutionGuardTest {
         SafetyGuardrailsService safetyGuardrailsService = new SafetyGuardrailsService(
                 Clock.fixed(Instant.parse("2026-04-20T16:00:00Z"), ZoneOffset.UTC),
                 properties,
-                dispatchApprovalService
+                dispatchApprovalService,
+                killSwitchService
         );
+        when(killSwitchService.isEnabled()).thenReturn(false);
         agentExecutionGuard = new AgentExecutionGuard(safetyGuardrailsService);
     }
 

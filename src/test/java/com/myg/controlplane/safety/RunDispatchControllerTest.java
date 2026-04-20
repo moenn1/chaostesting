@@ -1,6 +1,7 @@
 package com.myg.controlplane.safety;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -112,6 +113,89 @@ class RunDispatchControllerTest {
                 .andExpect(jsonPath("$.status").value("AUTHORIZED"))
                 .andExpect(jsonPath("$.approvalId").value(approvalId))
                 .andExpect(jsonPath("$.targetEnvironment").value("prod"));
+    }
+
+    @Test
+    void enablingKillSwitchStopsActiveRunsAndWritesAuditMetadata() throws Exception {
+        MvcResult dispatch = mockMvc.perform(post("/safety/dispatches")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "checkout-service",
+                                  "faultType": "latency",
+                                  "requestedDurationSeconds": 120
+                                }
+                                """))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        String runId = readField(dispatch.getResponse().getContentAsString(), "dispatchId");
+
+        mockMvc.perform(post("/safety/kill-switch/enable")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "operator": "ops-oncall",
+                                  "reason": "customer-impact containment"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(true))
+                .andExpect(jsonPath("$.lastEnabledBy").value("ops-oncall"))
+                .andExpect(jsonPath("$.lastEnableReason").value("customer-impact containment"))
+                .andExpect(jsonPath("$.activeRunCount").value(0))
+                .andExpect(jsonPath("$.stopRequestedRunCount").value(1));
+
+        mockMvc.perform(get("/safety/runs").param("status", "stop_requested"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].id").value(runId))
+                .andExpect(jsonPath("$[0].status").value("STOP_REQUESTED"))
+                .andExpect(jsonPath("$[0].stopCommandIssuedBy").value("ops-oncall"))
+                .andExpect(jsonPath("$[0].stopCommandReason").value("customer-impact containment"));
+
+        mockMvc.perform(get("/safety/audit-records"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].eventType").value("RUN_STOP_REQUESTED"))
+                .andExpect(jsonPath("$[0].runId").value(runId))
+                .andExpect(jsonPath("$[0].operator").value("ops-oncall"))
+                .andExpect(jsonPath("$[0].reason").value("customer-impact containment"))
+                .andExpect(jsonPath("$[1].eventType").value("KILL_SWITCH_ENABLED"))
+                .andExpect(jsonPath("$[1].operator").value("ops-oncall"))
+                .andExpect(jsonPath("$[1].reason").value("customer-impact containment"));
+    }
+
+    @Test
+    void blocksNewRunCreationWhileKillSwitchIsEnabled() throws Exception {
+        mockMvc.perform(post("/safety/kill-switch/enable")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "operator": "ops-oncall",
+                                  "reason": "region isolation"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/safety/dispatches")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "checkout-service",
+                                  "faultType": "latency",
+                                  "requestedDurationSeconds": 120
+                                }
+                                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.decision").value("REJECTED"))
+                .andExpect(jsonPath("$.violations[0].code").value("KILL_SWITCH_ACTIVE"));
+
+        mockMvc.perform(get("/safety/runs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
     }
 
     @Test

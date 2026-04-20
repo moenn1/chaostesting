@@ -12,13 +12,16 @@ public class SafetyGuardrailsService {
     private final Clock clock;
     private final SafetyGuardrailsProperties properties;
     private final DispatchApprovalService dispatchApprovalService;
+    private final KillSwitchService killSwitchService;
 
     public SafetyGuardrailsService(Clock clock,
                                    SafetyGuardrailsProperties properties,
-                                   DispatchApprovalService dispatchApprovalService) {
+                                   DispatchApprovalService dispatchApprovalService,
+                                   KillSwitchService killSwitchService) {
         this.clock = clock;
         this.properties = properties;
         this.dispatchApprovalService = dispatchApprovalService;
+        this.killSwitchService = killSwitchService;
     }
 
     public DispatchValidationResponse validate(RunDispatchRequest request) {
@@ -46,6 +49,13 @@ public class SafetyGuardrailsService {
     DispatchValidationResult evaluate(RunDispatchRequest request) {
         String normalizedEnvironment = properties.normalizeEnvironment(request.targetEnvironment());
         List<GuardrailViolation> violations = new ArrayList<>();
+
+        if (killSwitchService.isEnabled()) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.KILL_SWITCH_ACTIVE,
+                    "Global kill switch is enabled; new dispatches are blocked until the platform is re-enabled."
+            ));
+        }
 
         if (!isEnvironmentAllowed(normalizedEnvironment)) {
             violations.add(new GuardrailViolation(
