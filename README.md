@@ -132,6 +132,8 @@ make ci-local
 
 The local bootstrap initializes PostgreSQL, Redis, and RabbitMQ. PostgreSQL is pre-seeded with sample agents so the first API tickets can query real data immediately after the app starts.
 
+The control-plane schema now lives under Flyway migrations in `src/main/resources/db/migration`. The local bootstrap still pre-seeds PostgreSQL with sample agents so the first API tickets can query real data immediately after the app starts, and the app applies the remaining schema migrations when it connects.
+
 Verify the seeded agents:
 
 ```bash
@@ -183,5 +185,6 @@ Builder saves are stored in browser local storage, so refreshes preserve the las
 
 - If `make run-local` fails with a PostgreSQL connection error, rerun `make bootstrap-local` and wait for the dependency checks to pass.
 - If sample agents are missing, reset the stack with `make local-reset` so PostgreSQL replays the init scripts on a fresh volume.
+- If the app fails startup on an older local database, rerun it once so Flyway can baseline the schema, or remove the local `data/chaos-control-plane.mv.db` file if you want a fully clean H2 reset.
 - If port `5432`, `6379`, `5672`, or `15672` is already in use, stop the local conflicting service before bringing the stack up.
 - If `docker compose` times out while pulling images from Docker Hub, configure the Docker daemon or Docker Desktop proxy settings separately from your shell env vars, then rerun `make bootstrap-local`.

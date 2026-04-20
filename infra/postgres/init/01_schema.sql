@@ -14,5 +14,5 @@ CREATE TABLE IF NOT EXISTS agent_capabilities (
     PRIMARY KEY (agent_id, capability)
 );
 
-CREATE INDEX IF NOT EXISTS idx_agents_environment ON agents(environment);
-CREATE INDEX IF NOT EXISTS idx_agents_region ON agents(region);
+CREATE INDEX IF NOT EXISTS idx_agents_environment_last_heartbeat ON agents(environment, last_heartbeat_at);
+CREATE INDEX IF NOT EXISTS idx_agents_region_last_heartbeat ON agents(region, last_heartbeat_at);
