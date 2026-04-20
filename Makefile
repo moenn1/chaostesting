@@ -1,12 +1,15 @@
 SHELL := /bin/bash
 
-.PHONY: bootstrap-local run-local local-health local-reset
+.PHONY: bootstrap-local run-local test-local local-health local-reset
 
 bootstrap-local:
 	./scripts/local/bootstrap.sh
 
 run-local:
-	SPRING_PROFILES_ACTIVE=local mvn spring-boot:run
+	./scripts/run-local.sh
+
+test-local:
+	./scripts/test-local.sh
 
 local-health:
 	./scripts/local/check-health.sh

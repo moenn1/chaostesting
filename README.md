@@ -28,6 +28,12 @@ Check local health after the app is running:
 make local-health
 ```
 
+Run the automated test suite:
+
+```bash
+make test-local
+```
+
 The local bootstrap initializes PostgreSQL, Redis, and RabbitMQ. PostgreSQL is pre-seeded with sample agents so the first API tickets can query real data immediately after the app starts.
 
 Verify the seeded agents:
@@ -42,6 +48,8 @@ Reset the local stack and re-run the seed scripts:
 make local-reset
 make bootstrap-local
 ```
+
+Full step-by-step bootstrap, reset, and troubleshooting notes live in `docs/local-development.md`.
 
 ## Default local endpoints
 
