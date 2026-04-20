@@ -24,17 +24,20 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/safety")
 public class RunDispatchController {
 
+    private final ChaosRunDispatchService chaosRunDispatchService;
     private final ChaosRunService chaosRunService;
     private final DispatchApprovalService dispatchApprovalService;
     private final KillSwitchService killSwitchService;
     private final SafetyGuardrailsService safetyGuardrailsService;
     private final CurrentSecurityActor currentSecurityActor;
 
-    public RunDispatchController(ChaosRunService chaosRunService,
+    public RunDispatchController(ChaosRunDispatchService chaosRunDispatchService,
+                                 ChaosRunService chaosRunService,
                                  DispatchApprovalService dispatchApprovalService,
                                  KillSwitchService killSwitchService,
                                  SafetyGuardrailsService safetyGuardrailsService,
                                  CurrentSecurityActor currentSecurityActor) {
+        this.chaosRunDispatchService = chaosRunDispatchService;
         this.chaosRunService = chaosRunService;
         this.dispatchApprovalService = dispatchApprovalService;
         this.killSwitchService = killSwitchService;
@@ -63,7 +66,7 @@ public class RunDispatchController {
     @PreAuthorize("hasAuthority('chaos.operate')")
     public DispatchAuthorizationResponse authorize(@Valid @RequestBody RunDispatchRequest request,
                                                    Authentication authentication) {
-        return chaosRunService.createRun(currentSecurityActor.username(authentication), request);
+        return chaosRunDispatchService.createRun(currentSecurityActor.username(authentication), request);
     }
 
     @GetMapping("/runs")

@@ -6,9 +6,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ChaosRunDispatchService {
 
+    private final SafetyGuardrailsService safetyGuardrailsService;
     private final ChaosRunService chaosRunService;
 
-    public ChaosRunDispatchService(ChaosRunService chaosRunService) {
+    public ChaosRunDispatchService(SafetyGuardrailsService safetyGuardrailsService,
+                                   ChaosRunService chaosRunService) {
+        this.safetyGuardrailsService = safetyGuardrailsService;
         this.chaosRunService = chaosRunService;
     }
 
@@ -17,6 +20,25 @@ public class ChaosRunDispatchService {
         String requestedBy = request.requestedBy() == null || request.requestedBy().isBlank()
                 ? "agent-runtime"
                 : request.requestedBy().trim();
-        return chaosRunService.createRun(requestedBy, request);
+        return createRun(requestedBy, request);
+    }
+
+    @Transactional
+    public DispatchAuthorizationResponse createRun(String requestedBy, RunDispatchRequest request) {
+        String normalizedRequestedBy = requestedBy.trim();
+        RunDispatchRequest sanitizedRequest = new RunDispatchRequest(
+                request.targetEnvironment(),
+                request.targetSelector(),
+                request.faultType(),
+                request.requestedDurationSeconds(),
+                request.latencyMilliseconds(),
+                request.trafficPercentage(),
+                request.approvalId(),
+                normalizedRequestedBy
+        );
+        DispatchAuthorizationResponse authorization =
+                safetyGuardrailsService.authorize(normalizedRequestedBy, sanitizedRequest);
+        chaosRunService.startAuthorizedRun(authorization, sanitizedRequest);
+        return authorization;
     }
 }

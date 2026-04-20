@@ -24,7 +24,6 @@ public class ChaosRunService {
 
     private final Clock clock;
     private final ChaosRunJpaRepository chaosRunJpaRepository;
-    private final SafetyGuardrailsService safetyGuardrailsService;
     private final LatencyTelemetrySnapshotJpaRepository latencyTelemetrySnapshotJpaRepository;
     private final AuditLogService auditLogService;
     private final TaskScheduler taskScheduler;
@@ -33,37 +32,16 @@ public class ChaosRunService {
 
     public ChaosRunService(Clock clock,
                            ChaosRunJpaRepository chaosRunJpaRepository,
-                           SafetyGuardrailsService safetyGuardrailsService,
                            LatencyTelemetrySnapshotJpaRepository latencyTelemetrySnapshotJpaRepository,
                            AuditLogService auditLogService,
                            TaskScheduler taskScheduler,
                            LatencyInjectionProperties latencyInjectionProperties) {
         this.clock = clock;
         this.chaosRunJpaRepository = chaosRunJpaRepository;
-        this.safetyGuardrailsService = safetyGuardrailsService;
         this.latencyTelemetrySnapshotJpaRepository = latencyTelemetrySnapshotJpaRepository;
         this.auditLogService = auditLogService;
         this.taskScheduler = taskScheduler;
         this.latencyInjectionProperties = latencyInjectionProperties;
-    }
-
-    @Transactional
-    public DispatchAuthorizationResponse createRun(String requestedBy, RunDispatchRequest request) {
-        String normalizedRequestedBy = requestedBy.trim();
-        RunDispatchRequest sanitizedRequest = new RunDispatchRequest(
-                request.targetEnvironment(),
-                request.targetSelector(),
-                request.faultType(),
-                request.requestedDurationSeconds(),
-                request.latencyMilliseconds(),
-                request.trafficPercentage(),
-                request.approvalId(),
-                normalizedRequestedBy
-        );
-        DispatchAuthorizationResponse authorization =
-                safetyGuardrailsService.authorize(normalizedRequestedBy, sanitizedRequest);
-        startAuthorizedRun(authorization, sanitizedRequest);
-        return authorization;
     }
 
     @Transactional
