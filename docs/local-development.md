@@ -78,3 +78,4 @@ make bootstrap-local
 - A seeded agent count of `0` means the PostgreSQL volume was created without the init scripts. Run `make local-reset` and then `make bootstrap-local` to rebuild the database from the checked-in SQL files.
 - If `make local-health` cannot reach the app but Docker services are healthy, confirm the app is running with the `local` profile and that the port in `APP_URL` matches the one used for startup.
 - If Docker reports a port conflict on `5432`, `6379`, `5672`, or `15672`, stop the conflicting local service or override the port mapping before retrying the bootstrap.
+- If `make bootstrap-local` fails on image pulls with a timeout against `registry-1.docker.io`, update the Docker daemon or Docker Desktop proxy settings. Shell-level `HTTP_PROXY` exports are not always enough because image pulls are performed by the daemon, not the shell process.

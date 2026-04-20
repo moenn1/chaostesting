@@ -65,3 +65,4 @@ Full step-by-step bootstrap, reset, and troubleshooting notes live in `docs/loca
 - If `make run-local` fails with a PostgreSQL connection error, rerun `make bootstrap-local` and wait for the dependency checks to pass.
 - If sample agents are missing, reset the stack with `make local-reset` so PostgreSQL replays the init scripts on a fresh volume.
 - If port `5432`, `6379`, `5672`, or `15672` is already in use, stop the local conflicting service before bringing the stack up.
+- If `docker compose` times out while pulling images from Docker Hub, configure the Docker daemon or Docker Desktop proxy settings separately from your shell env vars, then rerun `make bootstrap-local`.
