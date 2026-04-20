@@ -6,7 +6,7 @@ Spring Boot control-plane service for the Chaos Platform.
 
 - [Platform architecture](docs/platform-architecture.md): control-plane components, execution model, storage layout, event-bus status, and observability surfaces on the current `main` branch.
 - [Setup guide](docs/local-development.md): contributor, operator, and demo/evaluation paths with bootstrap, environment variables, proxy notes, and troubleshooting.
-- [Example walkthroughs](docs/example-walkthroughs.md): copy-paste API scenarios for latency drills, approval-gated production runs, run analysis, and the current demo-only HTTP error flow.
+- [Example walkthroughs](docs/example-walkthroughs.md): copy-paste API scenarios for latency drills, approval-gated production runs, run analysis, and scoped HTTP error flows.
 - [Security and RBAC](docs/security-auth.md): OIDC mode, local dev auth mode, and route permissions.
 - [CI quality gates](docs/ci-quality-gates.md): local and GitHub Actions verification workflow.
 
@@ -184,6 +184,42 @@ make bootstrap-local
 Full setup, architecture, and walkthrough notes live in `docs/local-development.md`, `docs/platform-architecture.md`, and `docs/example-walkthroughs.md`.
 CI workflow and branch-gate details live in `docs/ci-quality-gates.md`.
 
+## HTTP Error Injection
+
+The control plane now supports scoped HTTP error injection runs for `500` and `503` responses. Dispatches can set a traffic percentage plus optional route filters, and each run exposes stop and execution-report endpoints for success, failure, and rollback visibility.
+
+Example dispatch:
+
+```bash
+curl -s http://localhost:8080/safety/dispatches \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  -d '{
+    "targetEnvironment": "staging",
+    "targetSelector": "checkout-service",
+    "faultType": "http_error",
+    "requestedDurationSeconds": 120,
+    "errorCode": 503,
+    "trafficPercentage": 30,
+    "routeFilters": ["/checkout"],
+    "requestedBy": "experiment-operator"
+  }'
+```
+
+Example execution report:
+
+```bash
+curl -s http://localhost:8080/safety/runs/<run-id>/reports \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  -d '{
+    "state": "FAILURE",
+    "message": "Failed to attach scoped route filter."
+  }'
+```
+
 ## Default local endpoints
 
 - App: `http://localhost:8080`
@@ -195,7 +231,7 @@ CI workflow and branch-gate details live in `docs/ci-quality-gates.md`.
 
 ## Operator UI routes
 
-The MVP app shell exposes route-specific operator views under the default app URL:
+The current app shell exposes route-specific operator views under the default app URL:
 
 - Dashboard: `http://localhost:8080/`
 - Experiment builder: `http://localhost:8080/experiments/`
@@ -205,7 +241,7 @@ The MVP app shell exposes route-specific operator views under the default app UR
 
 ### Experiment builder capabilities
 
-The experiment builder route now supports the current MVP configuration flow for chaos drills:
+The experiment builder route now supports the current configuration flow for chaos drills:
 
 - Create a new draft or duplicate an existing draft from the route-local catalog.
 - Edit target selectors for service name, namespace, service tags, and environment targeting.

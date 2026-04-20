@@ -2,14 +2,20 @@ package com.myg.controlplane.safety;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Lob;
+import jakarta.persistence.OrderColumn;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -35,7 +41,15 @@ public class ChaosRunEntity {
 
     private Integer latencyMilliseconds;
 
+    private Integer errorCode;
+
     private Integer trafficPercentage;
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "chaos_run_route_filters", joinColumns = @JoinColumn(name = "run_id"))
+    @OrderColumn(name = "route_filter_order")
+    @Column(name = "route_filter", nullable = false)
+    private List<String> routeFilters;
 
     private UUID approvalId;
 
@@ -76,7 +90,9 @@ public class ChaosRunEntity {
                           String faultType,
                           long requestedDurationSeconds,
                           Integer latencyMilliseconds,
+                          Integer errorCode,
                           Integer trafficPercentage,
+                          List<String> routeFilters,
                           UUID approvalId,
                           ChaosRunStatus status,
                           Instant createdAt,
@@ -95,7 +111,9 @@ public class ChaosRunEntity {
         this.faultType = faultType;
         this.requestedDurationSeconds = requestedDurationSeconds;
         this.latencyMilliseconds = latencyMilliseconds;
+        this.errorCode = errorCode;
         this.trafficPercentage = trafficPercentage;
+        this.routeFilters = routeFilters == null ? List.of() : List.copyOf(routeFilters);
         this.approvalId = approvalId;
         this.status = status;
         this.createdAt = createdAt;
@@ -137,6 +155,11 @@ public class ChaosRunEntity {
         rollbackVerifiedAt = now;
     }
 
+    public void markFailed(Instant now) {
+        status = ChaosRunStatus.FAILED;
+        endedAt = now;
+    }
+
     public ChaosRun toDomain(ObjectMapper objectMapper) {
         return new ChaosRun(
                 id,
@@ -146,7 +169,9 @@ public class ChaosRunEntity {
                 faultType,
                 requestedDurationSeconds,
                 latencyMilliseconds,
+                errorCode,
                 trafficPercentage,
+                routeFilters,
                 approvalId,
                 status,
                 createdAt,
@@ -170,7 +195,9 @@ public class ChaosRunEntity {
                 faultType,
                 requestedDurationSeconds,
                 latencyMilliseconds,
+                errorCode,
                 trafficPercentage,
+                routeFilters,
                 approvalId,
                 status,
                 createdAt,

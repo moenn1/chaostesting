@@ -1,6 +1,7 @@
 package com.myg.controlplane.agents.runtime;
 
 import com.myg.controlplane.safety.RunDispatchRequest;
+import java.util.List;
 import java.util.UUID;
 
 public record AgentExecutionPlan(
@@ -10,9 +11,15 @@ public record AgentExecutionPlan(
         String faultType,
         long requestedDurationSeconds,
         Integer latencyMilliseconds,
+        Integer errorCode,
         Integer trafficPercentage,
+        List<String> routeFilters,
         UUID approvalId
 ) {
+    public AgentExecutionPlan {
+        routeFilters = routeFilters == null ? List.of() : List.copyOf(routeFilters);
+    }
+
     RunDispatchRequest toDispatchRequest() {
         return new RunDispatchRequest(
                 targetEnvironment,
@@ -20,7 +27,9 @@ public record AgentExecutionPlan(
                 faultType,
                 requestedDurationSeconds,
                 latencyMilliseconds,
+                errorCode,
                 trafficPercentage,
+                routeFilters,
                 approvalId,
                 "agent-runtime"
         );

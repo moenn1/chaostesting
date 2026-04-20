@@ -32,6 +32,8 @@ class ChaosRunServiceTest {
     private final AgentRegistryService agentRegistryService = Mockito.mock(AgentRegistryService.class);
     private final LatencyTelemetrySnapshotJpaRepository latencyTelemetrySnapshotJpaRepository =
             Mockito.mock(LatencyTelemetrySnapshotJpaRepository.class);
+    private final RunExecutionReportJpaRepository runExecutionReportJpaRepository =
+            Mockito.mock(RunExecutionReportJpaRepository.class);
     private final AuditLogService auditLogService = Mockito.mock(AuditLogService.class);
     private final RunLifecycleEventService runLifecycleEventService = Mockito.mock(RunLifecycleEventService.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -57,7 +59,9 @@ class ChaosRunServiceTest {
                 Optional.ofNullable(storedRun.get()));
         when(chaosRunJpaRepository.existsById(any(UUID.class))).thenAnswer(invocation -> storedRun.get() != null);
         when(runAssignmentJpaRepository.findAllByRunId(any(UUID.class))).thenReturn(List.of());
+        when(runAssignmentJpaRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(agentRegistryService.findAll(any(), any(), any(), any())).thenReturn(List.of());
+        when(runExecutionReportJpaRepository.save(any(RunExecutionReportEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(taskScheduler.scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class)))
                 .thenReturn(mock(ScheduledFuture.class));
         when(taskScheduler.schedule(any(Runnable.class), any(Instant.class)))
@@ -69,6 +73,7 @@ class ChaosRunServiceTest {
                 runAssignmentJpaRepository,
                 agentRegistryService,
                 latencyTelemetrySnapshotJpaRepository,
+                runExecutionReportJpaRepository,
                 auditLogService,
                 runLifecycleEventService,
                 objectMapper,
@@ -78,7 +83,7 @@ class ChaosRunServiceTest {
     }
 
     @Test
-    void timedRunRollsBackWhenDeadlineTaskExecutes() {
+    void timedLatencyRunRollsBackWhenDeadlineTaskExecutes() {
         UUID runId = UUID.randomUUID();
         DispatchAuthorizationResponse authorization = new DispatchAuthorizationResponse(
                 runId,
@@ -88,7 +93,9 @@ class ChaosRunServiceTest {
                 "latency",
                 120,
                 350,
+                null,
                 30,
+                List.of(),
                 null,
                 clock.instant()
         );
@@ -98,7 +105,9 @@ class ChaosRunServiceTest {
                 "latency",
                 120,
                 350,
+                null,
                 30,
+                List.of(),
                 null,
                 "experiment-operator"
         );
@@ -120,6 +129,8 @@ class ChaosRunServiceTest {
         assertThat(run.stopCommandReason()).isEqualTo("requested duration elapsed");
 
         verify(latencyTelemetrySnapshotJpaRepository, Mockito.times(2)).save(any(LatencyTelemetrySnapshotEntity.class));
+        verify(runExecutionReportJpaRepository).save(any(RunExecutionReportEntity.class));
+
         ArgumentCaptor<SafetyAuditEventType> actionCaptor = ArgumentCaptor.forClass(SafetyAuditEventType.class);
         verify(auditLogService, Mockito.times(3)).record(
                 actionCaptor.capture(),
@@ -136,6 +147,56 @@ class ChaosRunServiceTest {
                         SafetyAuditEventType.RUN_STOP_REQUESTED,
                         SafetyAuditEventType.RUN_ROLLBACK_VERIFIED
                 );
+    }
+
+    @Test
+    void failureReportMarksHttpErrorRunFailedAndPersistsExecutionReport() {
+        UUID runId = UUID.randomUUID();
+        DispatchAuthorizationResponse authorization = new DispatchAuthorizationResponse(
+                runId,
+                "AUTHORIZED",
+                "staging",
+                "checkout-service",
+                "http_error",
+                120,
+                null,
+                503,
+                30,
+                List.of("/checkout"),
+                null,
+                clock.instant()
+        );
+        RunDispatchRequest request = new RunDispatchRequest(
+                "staging",
+                "checkout-service",
+                "http_error",
+                120,
+                null,
+                503,
+                30,
+                List.of("/checkout"),
+                null,
+                "experiment-operator"
+        );
+
+        chaosRunService.startAuthorizedRun(authorization, request);
+        clock.advanceSeconds(1);
+
+        RunExecutionReportResponse response = chaosRunService.reportRun(
+                runId,
+                "agent-eu-1",
+                new RunExecutionReportRequest(
+                        RunExecutionReportState.FAILURE,
+                        "Failed to attach scoped route filter."
+                )
+        );
+
+        ChaosRun run = storedRun.get().toDomain();
+        assertThat(run.status()).isEqualTo(ChaosRunStatus.FAILED);
+        assertThat(run.endedAt()).isEqualTo(clock.instant());
+        assertThat(response.state()).isEqualTo(RunExecutionReportState.FAILURE);
+        assertThat(response.reportedBy()).isEqualTo("agent-eu-1");
+        verify(runExecutionReportJpaRepository).save(any(RunExecutionReportEntity.class));
     }
 
     private static final class MutableClock extends Clock {

@@ -59,7 +59,28 @@ class AgentExecutionGuardTest {
                 "latency",
                 60 * 20L,
                 250,
+                null,
                 30,
+                List.of(),
+                null
+        );
+
+        assertThatThrownBy(() -> agentExecutionGuard.verify(executionPlan))
+                .isInstanceOf(UnsafeExecutionPlanException.class);
+    }
+
+    @Test
+    void rejectsHttpErrorPlansMissingScopedTrafficConfig() {
+        AgentExecutionPlan executionPlan = new AgentExecutionPlan(
+                UUID.randomUUID(),
+                "staging",
+                "checkout",
+                "http_error",
+                300,
+                null,
+                503,
+                null,
+                List.of("/checkout"),
                 null
         );
 
@@ -75,10 +96,12 @@ class AgentExecutionGuardTest {
                 UUID.randomUUID(),
                 "prod",
                 "checkout",
-                "latency",
+                "http_error",
                 300,
-                250,
-                30,
+                null,
+                503,
+                20,
+                List.of("/checkout"),
                 approvalId
         );
 

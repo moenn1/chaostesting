@@ -5,7 +5,8 @@ public enum ChaosRunStatus {
     STOP_REQUESTED,
     ROLLED_BACK,
     STOPPED,
-    COMPLETED;
+    COMPLETED,
+    FAILED;
 
     public boolean canBeStopped() {
         return this == ACTIVE;

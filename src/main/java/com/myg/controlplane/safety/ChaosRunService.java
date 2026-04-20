@@ -33,6 +33,7 @@ public class ChaosRunService {
     private final RunAssignmentJpaRepository runAssignmentJpaRepository;
     private final AgentRegistryService agentRegistryService;
     private final LatencyTelemetrySnapshotJpaRepository latencyTelemetrySnapshotJpaRepository;
+    private final RunExecutionReportJpaRepository runExecutionReportJpaRepository;
     private final AuditLogService auditLogService;
     private final RunLifecycleEventService runLifecycleEventService;
     private final ObjectMapper objectMapper;
@@ -45,6 +46,7 @@ public class ChaosRunService {
                            RunAssignmentJpaRepository runAssignmentJpaRepository,
                            AgentRegistryService agentRegistryService,
                            LatencyTelemetrySnapshotJpaRepository latencyTelemetrySnapshotJpaRepository,
+                           RunExecutionReportJpaRepository runExecutionReportJpaRepository,
                            AuditLogService auditLogService,
                            RunLifecycleEventService runLifecycleEventService,
                            ObjectMapper objectMapper,
@@ -55,6 +57,7 @@ public class ChaosRunService {
         this.runAssignmentJpaRepository = runAssignmentJpaRepository;
         this.agentRegistryService = agentRegistryService;
         this.latencyTelemetrySnapshotJpaRepository = latencyTelemetrySnapshotJpaRepository;
+        this.runExecutionReportJpaRepository = runExecutionReportJpaRepository;
         this.auditLogService = auditLogService;
         this.runLifecycleEventService = runLifecycleEventService;
         this.objectMapper = objectMapper;
@@ -142,6 +145,69 @@ public class ChaosRunService {
                 .map(LatencyTelemetrySnapshotEntity::toDomain)
                 .map(LatencyTelemetrySnapshotResponse::from)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<RunExecutionReportResponse> findReports(UUID runId) {
+        ensureRunExists(runId);
+        return runExecutionReportJpaRepository.findAllByRunIdOrderByReportedAtDescIdDesc(runId).stream()
+                .map(RunExecutionReportEntity::toDomain)
+                .map(RunExecutionReportResponse::from)
+                .toList();
+    }
+
+    @Transactional
+    public RunExecutionReportResponse reportRun(UUID runId, String reportedBy, RunExecutionReportRequest request) {
+        ChaosRunEntity entity = loadRun(runId);
+        Instant now = clock.instant();
+        String message = request.message().trim();
+        ChaosRun currentRun = entity.toDomain(objectMapper);
+
+        if (request.state() == RunExecutionReportState.FAILURE
+                && currentRun.status() != ChaosRunStatus.ROLLED_BACK
+                && currentRun.status() != ChaosRunStatus.FAILED) {
+            cancelRuntime(runId);
+            List<RunAssignmentEntity> stoppedAssignments = stopAssignments(runId, now);
+            entity.markFailed(now);
+            chaosRunJpaRepository.save(entity);
+
+            ChaosRun failedRun = entity.toDomain(objectMapper);
+            auditLogService.record(
+                    SafetyAuditEventType.RUN_EXECUTION_FAILED,
+                    AuditResourceType.RUN,
+                    runId.toString(),
+                    reportedBy,
+                    "Execution failed for " + failedRun.targetSelector(),
+                    failureMetadata(failedRun, message, now, assignmentSummary(stoppedAssignments)),
+                    now
+            );
+        } else if (request.state() == RunExecutionReportState.ROLLBACK
+                && currentRun.status() != ChaosRunStatus.ROLLED_BACK) {
+            cancelRuntime(runId);
+            List<RunAssignmentEntity> stoppedAssignments = stopAssignments(runId, now);
+            entity.markRolledBack(now);
+            chaosRunJpaRepository.save(entity);
+
+            ChaosRun rolledBackRun = entity.toDomain(objectMapper);
+            if (supportsLatencyTelemetry(rolledBackRun)) {
+                latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.rollback(
+                        rolledBackRun,
+                        now,
+                        "Rollback verified by execution report."
+                ));
+            }
+            auditLogService.record(
+                    SafetyAuditEventType.RUN_ROLLBACK_VERIFIED,
+                    AuditResourceType.RUN,
+                    runId.toString(),
+                    reportedBy,
+                    "Rollback verified for " + rolledBackRun.targetSelector(),
+                    rollbackMetadata(rolledBackRun, now, message, assignmentSummary(stoppedAssignments)),
+                    now
+            );
+        }
+
+        return RunExecutionReportResponse.from(saveReport(runId, request.state(), reportedBy, message, now).toDomain());
     }
 
     @Transactional
@@ -236,7 +302,8 @@ public class ChaosRunService {
         ChaosRun currentRun = entity.toDomain(objectMapper);
         if (currentRun.status() == ChaosRunStatus.ROLLED_BACK
                 || currentRun.status() == ChaosRunStatus.STOPPED
-                || currentRun.status() == ChaosRunStatus.COMPLETED) {
+                || currentRun.status() == ChaosRunStatus.COMPLETED
+                || currentRun.status() == ChaosRunStatus.FAILED) {
             cancelRuntime(currentRun.id());
             return;
         }
@@ -263,6 +330,13 @@ public class ChaosRunService {
         chaosRunJpaRepository.save(entity);
 
         ChaosRun rolledBackRun = entity.toDomain(objectMapper);
+        saveReport(
+                currentRun.id(),
+                RunExecutionReportState.ROLLBACK,
+                operator,
+                "Rollback verified after " + reason + ".",
+                rollbackVerifiedAt
+        );
         if (supportsLatencyTelemetry(rolledBackRun)) {
             latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.rollback(
                     rolledBackRun,
@@ -386,6 +460,21 @@ public class ChaosRunService {
         return metadata;
     }
 
+    private Map<String, Object> failureMetadata(ChaosRun run,
+                                                String message,
+                                                Instant reportedAt,
+                                                RunAssignmentSummary assignmentSummary) {
+        Map<String, Object> metadata = baseRunMetadata(run);
+        metadata.put("failureReportedAt", reportedAt);
+        metadata.put("failureMessage", message);
+        metadata.put("endedAt", run.endedAt());
+        metadata.put("finalStatus", run.status());
+        metadata.put("assignmentCount", assignmentSummary.assignmentCount());
+        metadata.put("activeAssignmentCount", assignmentSummary.activeAssignmentCount());
+        metadata.put("stoppedAssignmentCount", assignmentSummary.stoppedAssignmentCount());
+        return metadata;
+    }
+
     private Map<String, Object> baseRunMetadata(ChaosRun run) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("targetEnvironment", run.targetEnvironment());
@@ -399,8 +488,14 @@ public class ChaosRunService {
         if (run.latencyMilliseconds() != null) {
             metadata.put("latencyMilliseconds", run.latencyMilliseconds());
         }
+        if (run.errorCode() != null) {
+            metadata.put("errorCode", run.errorCode());
+        }
         if (run.trafficPercentage() != null) {
             metadata.put("trafficPercentage", run.trafficPercentage());
+        }
+        if (!run.routeFilters().isEmpty()) {
+            metadata.put("routeFilters", run.routeFilters());
         }
         if (run.approvalId() != null) {
             metadata.put("approvalId", run.approvalId().toString());
@@ -446,6 +541,7 @@ public class ChaosRunService {
             case ROLLED_BACK -> "RUN_ALREADY_ROLLED_BACK";
             case STOPPED -> "RUN_ALREADY_STOPPED";
             case COMPLETED -> "RUN_ALREADY_COMPLETED";
+            case FAILED -> "RUN_ALREADY_FAILED";
             case ACTIVE -> "RUN_STOP_NOT_ALLOWED";
         };
         String message = switch (currentStatus) {
@@ -453,6 +549,7 @@ public class ChaosRunService {
             case ROLLED_BACK -> "Run has already been rolled back.";
             case STOPPED -> "Run has already been stopped.";
             case COMPLETED -> "Completed runs cannot be stopped again.";
+            case FAILED -> "Failed runs cannot be stopped again.";
             case ACTIVE -> "Run stop is only allowed for active runs.";
         };
         return new RunStopValidationResponse(code, message, runId, currentStatus, List.of(ChaosRunStatus.ACTIVE));
@@ -471,7 +568,9 @@ public class ChaosRunService {
                 authorization.faultType(),
                 authorization.requestedDurationSeconds(),
                 authorization.latencyMilliseconds(),
+                authorization.errorCode(),
                 authorization.trafficPercentage(),
+                authorization.routeFilters(),
                 authorization.approvalId(),
                 ChaosRunStatus.ACTIVE,
                 startedAt,
@@ -485,6 +584,21 @@ public class ChaosRunService {
                 null
         );
         return chaosRunJpaRepository.save(entity).toDomain(objectMapper);
+    }
+
+    private RunExecutionReportEntity saveReport(UUID runId,
+                                                RunExecutionReportState state,
+                                                String reportedBy,
+                                                String message,
+                                                Instant reportedAt) {
+        return runExecutionReportJpaRepository.save(new RunExecutionReportEntity(
+                UUID.randomUUID(),
+                runId,
+                state,
+                reportedBy,
+                message,
+                reportedAt
+        ));
     }
 
     private boolean supportsLatencyTelemetry(ChaosRun run) {

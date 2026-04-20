@@ -1344,7 +1344,7 @@ const experimentBuilderTemplates = [
     id: 'exp-inventory-packet-loss',
     title: 'Inventory gateway 503 surge',
     status: 'Draft',
-    description: 'Shape an MVP HTTP-failure experiment that returns 503s while consumer lag recovery is observed.',
+    description: 'Shape an HTTP-failure experiment that returns 503s while consumer lag recovery is observed.',
     target: {
       service: 'inventory-gateway',
       namespace: 'fulfillment',
@@ -2061,7 +2061,7 @@ function renderExperimentsRoute(environment, route) {
               <div class="surface-header">
                 <div>
                   <p class="surface-label">Payload preview</p>
-                  <h3>What the MVP save request would contain</h3>
+                  <h3>What the save request would contain</h3>
                 </div>
                 <span class="context-pill">${escapeHtml(draft.fault.type === 'latency' ? 'Latency' : 'HTTP error')}</span>
               </div>

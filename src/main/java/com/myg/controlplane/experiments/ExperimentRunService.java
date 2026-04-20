@@ -59,13 +59,16 @@ public class ExperimentRunService {
         }
 
         RunTargetSnapshot targetSnapshot = resolveTargetSnapshot(experiment);
+        String faultType = experiment.faultConfig().type();
         RunDispatchRequest request = new RunDispatchRequest(
                 experiment.environmentMetadata().environment(),
                 describeTargetSelector(experiment.targetSelector()),
-                experiment.faultConfig().type(),
+                faultType,
                 experiment.faultConfig().durationSeconds(),
-                integerParameter(experiment.faultConfig().parameters(), "latencyMs"),
+                "latency".equals(faultType) ? integerParameter(experiment.faultConfig().parameters(), "latencyMs") : null,
+                "http_error".equals(faultType) ? integerParameter(experiment.faultConfig().parameters(), "statusCode") : null,
                 integerParameter(experiment.faultConfig().parameters(), "percentage"),
+                List.of(),
                 approvalId,
                 requestedBy.trim()
         );

@@ -1,6 +1,7 @@
 package com.myg.controlplane.safety;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record ChaosRun(
@@ -11,7 +12,9 @@ public record ChaosRun(
         String faultType,
         long requestedDurationSeconds,
         Integer latencyMilliseconds,
+        Integer errorCode,
         Integer trafficPercentage,
+        List<String> routeFilters,
         UUID approvalId,
         ChaosRunStatus status,
         Instant createdAt,
@@ -24,4 +27,7 @@ public record ChaosRun(
         String stopCommandIssuedBy,
         String stopCommandReason
 ) {
+    public ChaosRun {
+        routeFilters = routeFilters == null ? List.of() : List.copyOf(routeFilters);
+    }
 }

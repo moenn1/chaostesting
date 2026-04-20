@@ -87,6 +87,20 @@ public class RunDispatchController {
         return chaosRunService.findTelemetry(runId);
     }
 
+    @GetMapping("/runs/{runId}/reports")
+    @PreAuthorize("hasAuthority('chaos.view')")
+    public List<RunExecutionReportResponse> listReports(@PathVariable UUID runId) {
+        return chaosRunService.findReports(runId);
+    }
+
+    @PostMapping("/runs/{runId}/reports")
+    @PreAuthorize("hasAuthority('chaos.operate')")
+    public RunExecutionReportResponse reportRun(@PathVariable UUID runId,
+                                                @Valid @RequestBody RunExecutionReportRequest request,
+                                                Authentication authentication) {
+        return chaosRunService.reportRun(runId, currentSecurityActor.username(authentication), request);
+    }
+
     @PostMapping("/runs/{runId}/stop")
     @PreAuthorize("hasAuthority('chaos.operate')")
     public ChaosRunResponse stopRun(@PathVariable UUID runId,

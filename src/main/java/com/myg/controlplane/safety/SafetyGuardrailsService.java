@@ -63,7 +63,9 @@ public class SafetyGuardrailsService {
                 response.faultType(),
                 request.requestedDurationSeconds(),
                 request.latencyMilliseconds(),
+                request.errorCode(),
                 request.trafficPercentage(),
+                request.routeFilters(),
                 request.approvalId(),
                 clock.instant()
         );
@@ -96,8 +98,11 @@ public class SafetyGuardrailsService {
             ));
         }
 
-        if ("latency".equals(request.normalizedFaultType())) {
-            evaluateLatencyConfiguration(request, violations);
+        switch (request.normalizedFaultType()) {
+            case "latency" -> evaluateLatencyConfiguration(request, violations);
+            case "http_error" -> validateHttpErrorConfig(request, violations);
+            default -> {
+            }
         }
 
         if (requiresApproval(normalizedEnvironment)) {
@@ -133,16 +138,36 @@ public class SafetyGuardrailsService {
             ));
         }
 
-        if (request.trafficPercentage() == null || request.trafficPercentage() <= 0) {
+        validateTrafficPercentage(request.trafficPercentage(), violations);
+    }
+
+    private void validateHttpErrorConfig(RunDispatchRequest request, List<GuardrailViolation> violations) {
+        if (request.errorCode() == null) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.HTTP_ERROR_CODE_REQUIRED,
+                    "HTTP error injection requires an errorCode of 500 or 503."
+            ));
+        } else if (request.errorCode() != 500 && request.errorCode() != 503) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.HTTP_ERROR_CODE_UNSUPPORTED,
+                    "HTTP error injection supports only 500 and 503 response codes."
+            ));
+        }
+
+        validateTrafficPercentage(request.trafficPercentage(), violations);
+    }
+
+    private void validateTrafficPercentage(Integer trafficPercentage, List<GuardrailViolation> violations) {
+        if (trafficPercentage == null || trafficPercentage <= 0) {
             violations.add(new GuardrailViolation(
                     GuardrailViolationCode.TRAFFIC_PERCENTAGE_REQUIRED,
-                    "Latency faults require a trafficPercentage between 1 and 100."
+                    "Fault dispatches require a trafficPercentage between 1 and 100."
             ));
-        } else if (request.trafficPercentage() > 100) {
+        } else if (trafficPercentage > 100) {
             violations.add(new GuardrailViolation(
                     GuardrailViolationCode.TRAFFIC_PERCENTAGE_INVALID,
                     "Traffic percentage %s is outside the supported 1-100 range."
-                            .formatted(request.trafficPercentage())
+                            .formatted(trafficPercentage)
             ));
         }
     }
@@ -174,8 +199,20 @@ public class SafetyGuardrailsService {
         metadata.put("decision", response.decision().name());
         metadata.put("targetEnvironment", response.targetEnvironment());
         metadata.put("targetSelector", request.targetSelector().trim());
-        metadata.put("faultType", request.faultType().trim());
+        metadata.put("faultType", request.normalizedFaultType());
         metadata.put("requestedDurationSeconds", request.requestedDurationSeconds());
+        if (request.latencyMilliseconds() != null) {
+            metadata.put("latencyMilliseconds", request.latencyMilliseconds());
+        }
+        if (request.errorCode() != null) {
+            metadata.put("errorCode", request.errorCode());
+        }
+        if (request.trafficPercentage() != null) {
+            metadata.put("trafficPercentage", request.trafficPercentage());
+        }
+        if (!request.routeFilters().isEmpty()) {
+            metadata.put("routeFilters", request.routeFilters());
+        }
         if (request.approvalId() != null) {
             metadata.put("approvalId", request.approvalId().toString());
         }

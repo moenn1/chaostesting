@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS chaos_runs (
     fault_type VARCHAR(255) NOT NULL,
     requested_duration_seconds BIGINT NOT NULL,
     latency_milliseconds INTEGER,
+    error_code INTEGER,
     traffic_percentage INTEGER,
     approval_id UUID REFERENCES dispatch_approvals(id),
     status VARCHAR(64) NOT NULL,
@@ -81,6 +82,16 @@ CREATE INDEX IF NOT EXISTS idx_chaos_runs_status_created_at ON chaos_runs(status
 CREATE INDEX IF NOT EXISTS idx_chaos_runs_environment_created_at ON chaos_runs(target_environment, created_at);
 CREATE INDEX IF NOT EXISTS idx_chaos_runs_experiment_status_started_at
     ON chaos_runs(experiment_id, status, started_at);
+
+CREATE TABLE IF NOT EXISTS chaos_run_route_filters (
+    run_id UUID NOT NULL REFERENCES chaos_runs(id) ON DELETE CASCADE,
+    route_filter_order INTEGER NOT NULL,
+    route_filter VARCHAR(255) NOT NULL,
+    PRIMARY KEY (run_id, route_filter_order)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chaos_run_route_filters_run_order
+    ON chaos_run_route_filters(run_id, route_filter_order);
 
 CREATE TABLE IF NOT EXISTS run_assignments (
     id UUID PRIMARY KEY,
@@ -160,6 +171,18 @@ CREATE TABLE IF NOT EXISTS latency_telemetry_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_latency_telemetry_snapshots_run_captured_at
     ON latency_telemetry_snapshots(run_id, captured_at);
+
+CREATE TABLE IF NOT EXISTS run_execution_reports (
+    id UUID PRIMARY KEY,
+    run_id UUID NOT NULL REFERENCES chaos_runs(id) ON DELETE CASCADE,
+    state VARCHAR(64) NOT NULL,
+    reported_by VARCHAR(255) NOT NULL,
+    message VARCHAR(512) NOT NULL,
+    reported_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_execution_reports_run_reported_at
+    ON run_execution_reports(run_id, reported_at);
 
 CREATE TABLE IF NOT EXISTS run_lifecycle_events (
     id UUID PRIMARY KEY,

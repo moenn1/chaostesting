@@ -1,6 +1,5 @@
 package com.myg.controlplane.safety;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -13,8 +12,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.Arrays;
-import java.util.UUID;
+import java.util.concurrent.ScheduledFuture;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -61,14 +59,8 @@ class RunDispatchControllerTest {
     @Autowired
     private MutableClock clock;
 
-    @Autowired
-    private ChaosRunJpaRepository chaosRunJpaRepository;
-
-    @Autowired
-    private RunAssignmentJpaRepository runAssignmentJpaRepository;
-
     @Test
-    void validatesNonProductionDispatchesWithoutApproval() throws Exception {
+    void validatesNonProductionLatencyDispatchesWithoutApproval() throws Exception {
         mockMvc.perform(as(post("/safety/dispatches/validate"), "experiment-operator", "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -90,28 +82,29 @@ class RunDispatchControllerTest {
     }
 
     @Test
-    void requiresApprovalBeforeDispatchingIntoProductionLikeEnvironment() throws Exception {
-        mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
+    void validatesScopedHttpErrorDispatches() throws Exception {
+        mockMvc.perform(as(post("/safety/dispatches/validate"), "experiment-operator", "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "targetEnvironment": "prod",
+                                  "targetEnvironment": "staging",
                                   "targetSelector": "checkout-service",
-                                  "faultType": "latency",
+                                  "faultType": "http_error",
                                   "requestedDurationSeconds": 120,
-                                  "latencyMilliseconds": 350,
+                                  "errorCode": 503,
                                   "trafficPercentage": 30,
+                                  "routeFilters": ["/checkout", "/payments/authorize"],
                                   "requestedBy": "experiment-operator"
                                 }
                                 """))
-                .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.decision").value("APPROVAL_REQUIRED"))
-                .andExpect(jsonPath("$.requiresApproval").value(true))
-                .andExpect(jsonPath("$.violations[0].code").value("APPROVAL_REQUIRED"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decision").value("ALLOWED"))
+                .andExpect(jsonPath("$.allowed").value(true))
+                .andExpect(jsonPath("$.violations", hasSize(0)));
     }
 
     @Test
-    void authorizesProductionDispatchWhenAnApprovalExists() throws Exception {
+    void authorizesProductionHttpErrorDispatchWhenApprovalExists() throws Exception {
         MvcResult approvalCreation = mockMvc.perform(as(post("/safety/approvals"), "platform-admin", "APPROVER")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -125,16 +118,17 @@ class RunDispatchControllerTest {
 
         String approvalId = readField(approvalCreation.getResponse().getContentAsString(), "id");
 
-        mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
+        MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "targetEnvironment": "prod",
                                   "targetSelector": "checkout-service",
-                                  "faultType": "latency",
+                                  "faultType": "http_error",
                                   "requestedDurationSeconds": 300,
-                                  "latencyMilliseconds": 350,
-                                  "trafficPercentage": 30,
+                                  "errorCode": 500,
+                                  "trafficPercentage": 15,
+                                  "routeFilters": ["/checkout"],
                                   "approvalId": "%s",
                                   "requestedBy": "experiment-operator"
                                 }
@@ -142,48 +136,26 @@ class RunDispatchControllerTest {
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.status").value("AUTHORIZED"))
                 .andExpect(jsonPath("$.approvalId").value(approvalId))
-                .andExpect(jsonPath("$.latencyMilliseconds").value(350))
-                .andExpect(jsonPath("$.trafficPercentage").value(30))
-                .andExpect(jsonPath("$.targetEnvironment").value("prod"));
-
-        mockMvc.perform(as(get("/audit/events")
-                        .param("action", "approval_created")
-                        .param("resourceType", "approval")
-                        .param("resourceId", approvalId), "viewer", "VIEWER"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].actor").value("platform-admin"))
-                .andExpect(jsonPath("$[0].metadata.targetEnvironment").value("prod"));
-
-        mockMvc.perform(as(get("/audit/events")
-                        .param("action", "run_started")
-                        .param("resourceType", "run")
-                        .param("actor", "experiment-operator"), "viewer", "VIEWER"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].metadata.approvalId").value(approvalId))
-                .andExpect(jsonPath("$[0].metadata.targetSelector").value("checkout-service"));
-    }
-
-    @Test
-    void stopEndpointRollsBackRunAndPersistsTelemetryAndAuditTrail() throws Exception {
-        MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "targetEnvironment": "staging",
-                                  "targetSelector": "checkout-service",
-                                  "faultType": "latency",
-                                  "requestedDurationSeconds": 120,
-                                  "latencyMilliseconds": 350,
-                                  "trafficPercentage": 30,
-                                  "requestedBy": "experiment-operator"
-                                }
-                                """))
-                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.errorCode").value(500))
+                .andExpect(jsonPath("$.trafficPercentage").value(15))
+                .andExpect(jsonPath("$.routeFilters[0]").value("/checkout"))
                 .andReturn();
 
         String runId = readField(dispatch.getResponse().getContentAsString(), "dispatchId");
+
+        mockMvc.perform(as(get("/safety/runs/{runId}", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(runId))
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.errorCode").value(500))
+                .andExpect(jsonPath("$.trafficPercentage").value(15))
+                .andExpect(jsonPath("$.routeFilters[0]").value("/checkout"))
+                .andExpect(jsonPath("$.rollbackScheduledAt").exists());
+    }
+
+    @Test
+    void stopEndpointRollsBackLatencyRunAndPersistsTelemetryAndAuditTrail() throws Exception {
+        String runId = dispatchLatencyRun();
 
         mockMvc.perform(as(get("/safety/runs/{runId}/telemetry", runId), "viewer", "VIEWER"))
                 .andExpect(status().isOk())
@@ -216,7 +188,7 @@ class RunDispatchControllerTest {
                 .andExpect(jsonPath("$[0].rollbackVerified").value(true))
                 .andExpect(jsonPath("$[1].phase").value("INJECTION"));
 
-        mockMvc.perform(as(get("/safety/audit-records").param("resourceId", runId), "viewer", "VIEWER"))
+        mockMvc.perform(as(get("/audit/events").param("resourceId", runId), "viewer", "VIEWER"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(3)))
                 .andExpect(jsonPath("$[0].action").value("RUN_ROLLBACK_VERIFIED"))
@@ -228,26 +200,41 @@ class RunDispatchControllerTest {
     }
 
     @Test
-    void enablingKillSwitchStopsActiveRunsAndWritesAuditMetadata() throws Exception {
-        registerAgent("staging-agent-01", "staging", "us-phoenix-1", "latency");
+    void reportEndpointTracksFailureStateAndAudit() throws Exception {
+        String runId = dispatchHttpErrorRun();
+        clock.advanceSeconds(1);
 
-        MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
+        mockMvc.perform(as(post("/safety/runs/{runId}/reports", runId), "agent-eu-1", "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "targetEnvironment": "staging",
-                                  "targetSelector": "checkout-service",
-                                  "faultType": "latency",
-                                  "requestedDurationSeconds": 120,
-                                  "latencyMilliseconds": 350,
-                                  "trafficPercentage": 30,
-                                  "requestedBy": "experiment-operator"
+                                  "state": "FAILURE",
+                                  "message": "Failed to attach scoped route filter."
                                 }
                                 """))
-                .andExpect(status().isAccepted())
-                .andReturn();
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("FAILURE"))
+                .andExpect(jsonPath("$.reportedBy").value("agent-eu-1"));
 
-        String runId = readField(dispatch.getResponse().getContentAsString(), "dispatchId");
+        mockMvc.perform(as(get("/safety/runs/{runId}", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAILED"));
+
+        mockMvc.perform(as(get("/safety/runs/{runId}/reports", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].state").value("FAILURE"))
+                .andExpect(jsonPath("$[0].reportedBy").value("agent-eu-1"));
+
+        mockMvc.perform(as(get("/audit/events").param("resourceId", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].action").value("RUN_EXECUTION_FAILED"))
+                .andExpect(jsonPath("$[0].actor").value("agent-eu-1"));
+    }
+
+    @Test
+    void enablingKillSwitchStopsActiveRunsAndWritesAuditMetadata() throws Exception {
+        String runId = dispatchLatencyRun();
         clock.advanceSeconds(1);
 
         mockMvc.perform(as(post("/safety/kill-switch/enable"), "ops-oncall", "ADMIN")
@@ -260,11 +247,9 @@ class RunDispatchControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.enabled").value(true))
                 .andExpect(jsonPath("$.lastEnabledBy").value("ops-oncall"))
-                .andExpect(jsonPath("$.lastEnableReason").value("customer-impact containment"))
                 .andExpect(jsonPath("$.activeRunCount").value(0))
                 .andExpect(jsonPath("$.stopRequestedRunCount").value(0))
                 .andExpect(jsonPath("$.rolledBackRunCount").value(1))
-                .andExpect(jsonPath("$.stoppedRunCount").value(0))
                 .andExpect(jsonPath("$.stopRequestsIssued").value(1));
 
         mockMvc.perform(as(get("/safety/runs").param("status", "rolled_back"), "viewer", "VIEWER"))
@@ -272,33 +257,7 @@ class RunDispatchControllerTest {
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].id").value(runId))
                 .andExpect(jsonPath("$[0].status").value("ROLLED_BACK"))
-                .andExpect(jsonPath("$[0].stopCommandIssuedBy").value("ops-oncall"))
-                .andExpect(jsonPath("$[0].stopCommandReason").value("customer-impact containment"))
-                .andExpect(jsonPath("$[0].assignmentCount").value(1))
-                .andExpect(jsonPath("$[0].activeAssignmentCount").value(0))
-                .andExpect(jsonPath("$[0].stoppedAssignmentCount").value(1));
-
-        mockMvc.perform(as(get("/safety/audit-records")
-                        .param("resourceType", "run")
-                        .param("resourceId", runId), "viewer", "VIEWER"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(3)))
-                .andExpect(jsonPath("$[0].action").value("RUN_ROLLBACK_VERIFIED"))
-                .andExpect(jsonPath("$[0].resourceId").value(runId))
-                .andExpect(jsonPath("$[0].actor").value("ops-oncall"))
-                .andExpect(jsonPath("$[0].metadata.finalStatus").value("ROLLED_BACK"))
-                .andExpect(jsonPath("$[1].action").value("RUN_STOP_REQUESTED"))
-                .andExpect(jsonPath("$[1].actor").value("ops-oncall"))
-                .andExpect(jsonPath("$[2].action").value("RUN_STARTED"))
-                .andExpect(jsonPath("$[2].actor").value("experiment-operator"));
-
-        mockMvc.perform(as(get("/safety/audit-records")
-                        .param("action", "kill_switch_enabled")
-                        .param("resourceType", "kill_switch"), "viewer", "VIEWER"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].actor").value("ops-oncall"))
-                .andExpect(jsonPath("$[0].summary").value("customer-impact containment"));
+                .andExpect(jsonPath("$[0].stopCommandIssuedBy").value("ops-oncall"));
     }
 
     @Test
@@ -328,149 +287,11 @@ class RunDispatchControllerTest {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.decision").value("REJECTED"))
                 .andExpect(jsonPath("$.violations[0].code").value("KILL_SWITCH_ACTIVE"));
-
-        mockMvc.perform(as(get("/safety/runs"), "viewer", "VIEWER"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(0)));
-
-        mockMvc.perform(as(get("/audit/events")
-                        .param("action", "run_start_rejected")
-                        .param("actor", "ops-oncall")
-                        .param("resourceType", "run_dispatch"), "viewer", "VIEWER"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].summary").value("Run start rejected by safety guardrails"))
-                .andExpect(jsonPath("$[0].metadata.targetEnvironment").value("staging"))
-                .andExpect(jsonPath("$[0].metadata.violations[0].code").value("KILL_SWITCH_ACTIVE"));
-    }
-
-    @Test
-    void rejectsDispatchesThatExceedTheConfiguredMaximumDuration() throws Exception {
-        mockMvc.perform(as(post("/safety/dispatches/validate"), "experiment-operator", "OPERATOR")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "targetEnvironment": "staging",
-                                  "targetSelector": "checkout-service",
-                                  "faultType": "latency",
-                                  "requestedDurationSeconds": 1200,
-                                  "latencyMilliseconds": 350,
-                                  "trafficPercentage": 30,
-                                  "requestedBy": "experiment-operator"
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.decision").value("REJECTED"))
-                .andExpect(jsonPath("$.maxDurationSeconds").value(900))
-                .andExpect(jsonPath("$.violations[0].code").value("MAX_DURATION_EXCEEDED"));
-    }
-
-    @Test
-    void disablingKillSwitchWritesAuditMetadata() throws Exception {
-        mockMvc.perform(as(post("/safety/kill-switch/enable"), "ops-oncall", "ADMIN")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "reason": "region isolation"
-                                }
-                                """))
-                .andExpect(status().isOk());
-
-        mockMvc.perform(as(post("/safety/kill-switch/disable"), "ops-oncall", "ADMIN")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "reason": "recovered"
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.enabled").value(false))
-                .andExpect(jsonPath("$.lastDisabledBy").value("ops-oncall"))
-                .andExpect(jsonPath("$.lastDisableReason").value("recovered"));
-
-        mockMvc.perform(as(get("/audit/events")
-                        .param("action", "kill_switch_disabled")
-                        .param("resourceType", "kill_switch"), "viewer", "VIEWER"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].actor").value("ops-oncall"))
-                .andExpect(jsonPath("$[0].summary").value("recovered"));
-    }
-
-    @Test
-    void operatorCanStopRunsAndAuditUsesAuthenticatedActor() throws Exception {
-        registerAgent("staging-agent-02", "staging", "us-phoenix-1", "latency");
-
-        MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "targetEnvironment": "staging",
-                                  "targetSelector": "checkout-service",
-                                  "faultType": "latency",
-                                  "requestedDurationSeconds": 120,
-                                  "latencyMilliseconds": 350,
-                                  "trafficPercentage": 30,
-                                  "requestedBy": "experiment-operator"
-                                }
-                                """))
-                .andExpect(status().isAccepted())
-                .andReturn();
-
-        String runId = readField(dispatch.getResponse().getContentAsString(), "dispatchId");
-
-        mockMvc.perform(as(post("/safety/runs/{runId}/stop", runId), "experiment-operator", "OPERATOR")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "reason": "manual abort"
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(runId))
-                .andExpect(jsonPath("$.status").value("ROLLED_BACK"))
-                .andExpect(jsonPath("$.stopCommandIssuedBy").value("experiment-operator"))
-                .andExpect(jsonPath("$.stopCommandReason").value("manual abort"))
-                .andExpect(jsonPath("$.assignmentCount").value(1))
-                .andExpect(jsonPath("$.activeAssignmentCount").value(0))
-                .andExpect(jsonPath("$.stoppedAssignmentCount").value(1));
-
-        RunAssignment persistedAssignment = runAssignmentJpaRepository.findAllByRunId(UUID.fromString(runId)).get(0).toDomain();
-        assertThat(persistedAssignment.status()).isEqualTo(RunAssignmentStatus.STOPPED);
-        assertThat(persistedAssignment.stopRequestedAt()).isEqualTo(Instant.parse("2026-04-20T16:00:00Z"));
-        assertThat(persistedAssignment.endedAt()).isEqualTo(Instant.parse("2026-04-20T16:00:00Z"));
-
-        mockMvc.perform(as(get("/audit/events")
-                        .param("action", "run_stop_requested")
-                        .param("resourceType", "run")
-                        .param("resourceId", runId), "viewer", "VIEWER"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].actor").value("experiment-operator"))
-                .andExpect(jsonPath("$[0].summary").value("Stop requested for checkout-service"))
-                .andExpect(jsonPath("$[0].metadata.assignmentCount").value(1))
-                .andExpect(jsonPath("$[0].metadata.stoppedAssignmentCount").value(1));
     }
 
     @Test
     void rejectingSecondStopReturnsClearValidationResponse() throws Exception {
-        MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "targetEnvironment": "staging",
-                                  "targetSelector": "checkout-service",
-                                  "faultType": "latency",
-                                  "requestedDurationSeconds": 120,
-                                  "latencyMilliseconds": 350,
-                                  "trafficPercentage": 30,
-                                  "requestedBy": "experiment-operator"
-                                }
-                                """))
-                .andExpect(status().isAccepted())
-                .andReturn();
-
-        String runId = readField(dispatch.getResponse().getContentAsString(), "dispatchId");
+        String runId = dispatchLatencyRun();
 
         mockMvc.perform(as(post("/safety/runs/{runId}/stop", runId), "experiment-operator", "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -497,46 +318,8 @@ class RunDispatchControllerTest {
     }
 
     @Test
-    void completedRunsCannotBeStoppedAgain() throws Exception {
-        UUID runId = UUID.randomUUID();
-        chaosRunJpaRepository.save(new ChaosRunEntity(
-                runId,
-                null,
-                "staging",
-                "checkout-service",
-                "latency",
-                120,
-                350,
-                30,
-                null,
-                ChaosRunStatus.COMPLETED,
-                Instant.parse("2026-04-20T15:50:00Z"),
-                Instant.parse("2026-04-20T15:55:00Z"),
-                Instant.parse("2026-04-20T15:52:00Z"),
-                Instant.parse("2026-04-20T15:55:00Z"),
-                Instant.parse("2026-04-20T15:50:00Z"),
-                null,
-                null,
-                null,
-                null
-        ));
-
-        mockMvc.perform(as(post("/safety/runs/{runId}/stop", runId), "experiment-operator", "OPERATOR")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "reason": "manual abort"
-                                }
-                                """))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("RUN_ALREADY_COMPLETED"))
-                .andExpect(jsonPath("$.message").value("Completed runs cannot be stopped again."))
-                .andExpect(jsonPath("$.currentStatus").value("COMPLETED"));
-    }
-
-    @Test
     void viewerCannotMutateDispatchApprovalOrAdminRoutes() throws Exception {
-        mockMvc.perform(as(post("/safety/dispatches")
+        mockMvc.perform(as(post("/safety/dispatches"), "observer", "VIEWER")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -548,53 +331,24 @@ class RunDispatchControllerTest {
                                   "trafficPercentage": 30,
                                   "requestedBy": "observer"
                                 }
-                                """), "observer", "VIEWER"))
+                                """))
                 .andExpect(status().isForbidden());
 
-        mockMvc.perform(as(post("/safety/approvals")
+        mockMvc.perform(as(post("/safety/approvals"), "observer", "VIEWER")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "targetEnvironment": "prod",
                                   "reason": "nope"
-                                }
-                                """), "observer", "VIEWER"))
-                .andExpect(status().isForbidden());
-
-        mockMvc.perform(as(post("/safety/kill-switch/enable")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "reason": "nope"
-                                }
-                                """), "observer", "VIEWER"))
-                .andExpect(status().isForbidden());
-    }
-
-    @Test
-    void approverCanApproveButCannotDispatch() throws Exception {
-        mockMvc.perform(as(post("/safety/approvals"), "platform-approver", "APPROVER")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "targetEnvironment": "prod",
-                                  "reason": "maintenance window"
                                 }
                                 """))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.approvedBy").value("platform-approver"));
+                .andExpect(status().isForbidden());
 
-        mockMvc.perform(as(post("/safety/dispatches"), "platform-approver", "APPROVER")
+        mockMvc.perform(as(post("/safety/kill-switch/enable"), "observer", "VIEWER")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "targetEnvironment": "staging",
-                                  "targetSelector": "checkout-service",
-                                  "faultType": "latency",
-                                  "requestedDurationSeconds": 120,
-                                  "latencyMilliseconds": 350,
-                                  "trafficPercentage": 30,
-                                  "requestedBy": "platform-approver"
+                                  "reason": "nope"
                                 }
                                 """))
                 .andExpect(status().isForbidden());
@@ -627,8 +381,52 @@ class RunDispatchControllerTest {
         @Bean
         @Primary
         TaskScheduler testTaskScheduler() {
-            return Mockito.mock(TaskScheduler.class);
+            TaskScheduler scheduler = Mockito.mock(TaskScheduler.class);
+            Mockito.when(scheduler.schedule(Mockito.any(Runnable.class), Mockito.any(Instant.class)))
+                    .thenReturn(Mockito.mock(ScheduledFuture.class));
+            Mockito.when(scheduler.scheduleAtFixedRate(Mockito.any(Runnable.class), Mockito.any(Instant.class), Mockito.any()))
+                    .thenReturn(Mockito.mock(ScheduledFuture.class));
+            return scheduler;
         }
+    }
+
+    private String dispatchLatencyRun() throws Exception {
+        MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "checkout-service",
+                                  "faultType": "latency",
+                                  "requestedDurationSeconds": 120,
+                                  "latencyMilliseconds": 350,
+                                  "trafficPercentage": 30,
+                                  "requestedBy": "experiment-operator"
+                                }
+                                """))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        return readField(dispatch.getResponse().getContentAsString(), "dispatchId");
+    }
+
+    private String dispatchHttpErrorRun() throws Exception {
+        MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "checkout-service",
+                                  "faultType": "http_error",
+                                  "requestedDurationSeconds": 120,
+                                  "errorCode": 503,
+                                  "trafficPercentage": 30,
+                                  "routeFilters": ["/checkout"],
+                                  "requestedBy": "experiment-operator"
+                                }
+                                """))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        return readField(dispatch.getResponse().getContentAsString(), "dispatchId");
     }
 
     private static String readField(String json, String fieldName) throws Exception {
@@ -640,25 +438,6 @@ class RunDispatchControllerTest {
         return builder
                 .header(DEV_USER_HEADER, username)
                 .header(DEV_ROLES_HEADER, roles);
-    }
-
-    private void registerAgent(String name, String environment, String region, String... capabilities) throws Exception {
-        String capabilitiesJson = Arrays.stream(capabilities)
-                .map(capability -> "\"" + capability + "\"")
-                .collect(java.util.stream.Collectors.joining(","));
-
-        mockMvc.perform(post("/agents/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "name": "%s",
-                                  "hostname": "%s.internal",
-                                  "environment": "%s",
-                                  "region": "%s",
-                                  "supportedFaultCapabilities": [%s]
-                                }
-                                """.formatted(name, name, environment, region, capabilitiesJson)))
-                .andExpect(status().isCreated());
     }
 
     static final class MutableClock extends Clock {

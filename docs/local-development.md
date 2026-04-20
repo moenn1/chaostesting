@@ -3,7 +3,7 @@
 This guide separates the local platform into three tracks:
 
 - Contributors: bootstrap the stack, run the service, and verify changes.
-- Operators: exercise the authenticated APIs, seeded agents, approvals, and kill-switch flows.
+- Operators: exercise the authenticated APIs, seeded agents, approvals, kill-switch flows, and HTTP error drills.
 - Demo or evaluation users: use the static UI routes and the curated walkthroughs without reverse-engineering the codebase.
 
 Pair this document with [Platform architecture](platform-architecture.md) and [Example walkthroughs](example-walkthroughs.md).
@@ -119,6 +119,75 @@ curl -s -X POST \
   }'
 ```
 
+### HTTP error drill
+
+Validate a scoped HTTP error injection as an operator:
+
+```bash
+curl -s \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/safety/dispatches/validate \
+  -d '{
+    "targetEnvironment": "staging",
+    "targetSelector": "checkout-service",
+    "faultType": "http_error",
+    "requestedDurationSeconds": 120,
+    "errorCode": 503,
+    "trafficPercentage": 30,
+    "routeFilters": ["/checkout"],
+    "requestedBy": "operator-demo"
+  }'
+```
+
+Dispatch the run once validation is allowed:
+
+```bash
+curl -s \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/safety/dispatches \
+  -d '{
+    "targetEnvironment": "staging",
+    "targetSelector": "checkout-service",
+    "faultType": "http_error",
+    "requestedDurationSeconds": 120,
+    "errorCode": 503,
+    "trafficPercentage": 30,
+    "routeFilters": ["/checkout"],
+    "requestedBy": "operator-demo"
+  }'
+```
+
+Report the execution outcome. The stored actor comes from the authenticated principal, not from the payload:
+
+```bash
+curl -s \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: agent-eu-1' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/safety/runs/<run-id>/reports \
+  -d '{
+    "state": "FAILURE",
+    "message": "Failed to attach scoped route filter."
+  }'
+```
+
+Stop the run manually if needed:
+
+```bash
+curl -s \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: ops-oncall' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/safety/runs/<run-id>/stop \
+  -d '{
+    "reason": "customer-impact containment"
+  }'
+```
+
 The authenticated operator routes are covered in [Security and RBAC](security-auth.md). The runnable end-to-end API flows are in [Example walkthroughs](example-walkthroughs.md).
 
 ## Demo and evaluation flow
@@ -126,7 +195,7 @@ The authenticated operator routes are covered in [Security and RBAC](security-au
 Use these assets when you want a fast product tour instead of a full local drill:
 
 - [Platform architecture](platform-architecture.md) for the current service topology and lifecycle flow.
-- [Example walkthroughs](example-walkthroughs.md) for copy-paste API examples and a demo-only HTTP error walkthrough.
+- [Example walkthroughs](example-walkthroughs.md) for copy-paste API examples and HTTP error walkthroughs.
 - Static UI routes under `http://localhost:8080/`
 - Dashboard: `http://localhost:8080/`
 - Experiment builder: `http://localhost:8080/experiments/`
