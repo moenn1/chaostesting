@@ -16,15 +16,18 @@ public class KillSwitchService {
     private final Clock clock;
     private final KillSwitchStateJpaRepository killSwitchStateJpaRepository;
     private final ChaosRunJpaRepository chaosRunJpaRepository;
+    private final RunAssignmentJpaRepository runAssignmentJpaRepository;
     private final AuditLogService auditLogService;
 
     public KillSwitchService(Clock clock,
                              KillSwitchStateJpaRepository killSwitchStateJpaRepository,
                              ChaosRunJpaRepository chaosRunJpaRepository,
+                             RunAssignmentJpaRepository runAssignmentJpaRepository,
                              AuditLogService auditLogService) {
         this.clock = clock;
         this.killSwitchStateJpaRepository = killSwitchStateJpaRepository;
         this.chaosRunJpaRepository = chaosRunJpaRepository;
+        this.runAssignmentJpaRepository = runAssignmentJpaRepository;
         this.auditLogService = auditLogService;
     }
 
@@ -48,9 +51,17 @@ public class KillSwitchService {
         stateEntity.enable(normalizedOperator, reason, now);
 
         List<ChaosRunEntity> activeRuns = chaosRunJpaRepository.findAllByStatus(ChaosRunStatus.ACTIVE);
-        activeRuns.forEach(run -> run.markStopRequested(normalizedOperator, reason, now));
+        activeRuns.forEach(run -> run.markStopped(normalizedOperator, reason, now));
+        List<RunAssignmentEntity> updatedAssignments = activeRuns.isEmpty()
+                ? List.of()
+                : runAssignmentJpaRepository.findAllByRunIdIn(
+                        activeRuns.stream().map(ChaosRunEntity::toDomain).map(ChaosRun::id).toList()
+                );
+        updatedAssignments.forEach(assignment -> assignment.markStopped(now));
 
         killSwitchStateJpaRepository.save(stateEntity);
+        chaosRunJpaRepository.saveAll(activeRuns);
+        runAssignmentJpaRepository.saveAll(updatedAssignments);
         auditLogService.record(
                 SafetyAuditEventType.KILL_SWITCH_ENABLED,
                 AuditResourceType.KILL_SWITCH,
@@ -113,7 +124,8 @@ public class KillSwitchService {
         return KillSwitchStatusResponse.from(
                 state,
                 chaosRunJpaRepository.countByStatus(ChaosRunStatus.ACTIVE),
-                chaosRunJpaRepository.countByStatus(ChaosRunStatus.STOP_REQUESTED)
+                chaosRunJpaRepository.countByStatus(ChaosRunStatus.STOP_REQUESTED),
+                chaosRunJpaRepository.countByStatus(ChaosRunStatus.STOPPED)
         );
     }
 
@@ -127,6 +139,8 @@ public class KillSwitchService {
             metadata.put("approvalId", run.approvalId().toString());
         }
         metadata.put("stopRequestedAt", stopRequestedAt);
+        metadata.put("endedAt", run.endedAt());
+        metadata.put("finalStatus", run.status());
         return metadata;
     }
 }

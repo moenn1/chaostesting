@@ -111,6 +111,12 @@ public class RunDispatchController {
     public void handleRunNotFound() {
     }
 
+    @ExceptionHandler(RunStopRejectedException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public RunStopValidationResponse handleRunStopRejected(RunStopRejectedException exception) {
+        return exception.getResponse();
+    }
+
     private ChaosRunStatus parseRunStatus(String rawStatus) {
         try {
             return ChaosRunStatus.valueOf(rawStatus.trim().toUpperCase(Locale.ROOT));

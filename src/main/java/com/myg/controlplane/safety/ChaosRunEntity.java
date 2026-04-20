@@ -37,6 +37,8 @@ public class ChaosRunEntity {
     @Column(nullable = false)
     private Instant createdAt;
 
+    private Instant endedAt;
+
     private Instant stopCommandIssuedAt;
 
     private String stopCommandIssuedBy;
@@ -55,6 +57,7 @@ public class ChaosRunEntity {
                           UUID approvalId,
                           ChaosRunStatus status,
                           Instant createdAt,
+                          Instant endedAt,
                           Instant stopCommandIssuedAt,
                           String stopCommandIssuedBy,
                           String stopCommandReason) {
@@ -66,16 +69,19 @@ public class ChaosRunEntity {
         this.approvalId = approvalId;
         this.status = status;
         this.createdAt = createdAt;
+        this.endedAt = endedAt;
         this.stopCommandIssuedAt = stopCommandIssuedAt;
         this.stopCommandIssuedBy = stopCommandIssuedBy;
         this.stopCommandReason = stopCommandReason;
     }
 
-    public void markStopRequested(String operator, String reason, Instant now) {
-        if (status != ChaosRunStatus.ACTIVE) {
-            return;
-        }
-        status = ChaosRunStatus.STOP_REQUESTED;
+    public boolean canBeStopped() {
+        return status.canBeStopped();
+    }
+
+    public void markStopped(String operator, String reason, Instant now) {
+        status = ChaosRunStatus.STOPPED;
+        endedAt = now;
         stopCommandIssuedAt = now;
         stopCommandIssuedBy = operator;
         stopCommandReason = reason;
@@ -91,6 +97,7 @@ public class ChaosRunEntity {
                 approvalId,
                 status,
                 createdAt,
+                endedAt,
                 stopCommandIssuedAt,
                 stopCommandIssuedBy,
                 stopCommandReason

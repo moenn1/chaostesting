@@ -12,11 +12,15 @@ public record ChaosRunResponse(
         long requestedDurationSeconds,
         UUID approvalId,
         Instant createdAt,
+        Instant endedAt,
         Instant stopCommandIssuedAt,
         String stopCommandIssuedBy,
-        String stopCommandReason
+        String stopCommandReason,
+        long assignmentCount,
+        long activeAssignmentCount,
+        long stoppedAssignmentCount
 ) {
-    public static ChaosRunResponse from(ChaosRun run) {
+    public static ChaosRunResponse from(ChaosRun run, RunAssignmentSummary assignmentSummary) {
         return new ChaosRunResponse(
                 run.id(),
                 run.status(),
@@ -26,9 +30,13 @@ public record ChaosRunResponse(
                 run.requestedDurationSeconds(),
                 run.approvalId(),
                 run.createdAt(),
+                run.endedAt(),
                 run.stopCommandIssuedAt(),
                 run.stopCommandIssuedBy(),
-                run.stopCommandReason()
+                run.stopCommandReason(),
+                assignmentSummary.assignmentCount(),
+                assignmentSummary.activeAssignmentCount(),
+                assignmentSummary.stoppedAssignmentCount()
         );
     }
 }

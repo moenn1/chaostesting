@@ -12,6 +12,7 @@ public record ChaosRun(
         UUID approvalId,
         ChaosRunStatus status,
         Instant createdAt,
+        Instant endedAt,
         Instant stopCommandIssuedAt,
         String stopCommandIssuedBy,
         String stopCommandReason
