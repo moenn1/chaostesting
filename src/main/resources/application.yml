@@ -30,3 +30,18 @@ chaos:
       - prod-shadow
     max-duration: 15m
     approval-ttl: 30m
+
+agent:
+  runtime:
+    enabled: false
+    control-plane-base-url: http://localhost:${server.port:8080}
+    name: local-agent
+    hostname: ${HOSTNAME:localhost}
+    environment: local
+    region: local
+    supported-fault-capabilities:
+      - latency
+      - http_error
+    heartbeat-interval: 10s
+    command-poll-interval: 5s
+    registration-file: ./data/agent-runtime/registration.json
