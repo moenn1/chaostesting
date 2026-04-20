@@ -251,6 +251,15 @@ The experiment builder route now supports the current configuration flow for cha
 
 Builder saves are stored in browser local storage, so refreshes preserve the last saved draft set for the current browser profile.
 
+### Live run monitoring
+
+The static app shell also includes a live run screen at `http://localhost:8080/live-runs/`. The current route is intentionally frontend-scoped: it uses stubbed run, agent, timeline, and stop-confirmation state so the operator workflow can be reviewed before backend timeline endpoints are wired.
+
+- The run list, detail card, agent progress, and execution timeline stay in a stable two-column operator frame.
+- The refresh action and background pulse simulate a live screen without calling backend timeline endpoints.
+- The stop panel keeps a local confirmation state in-frame so reviewers can validate the rollback interaction without leaving the page.
+- Environment switching still scopes the live-run scenarios to the selected shell context.
+
 ## Troubleshooting
 
 - If `make run-local` fails with a PostgreSQL connection error, rerun `make bootstrap-local` and wait for the dependency checks to pass.

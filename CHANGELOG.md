@@ -4,6 +4,7 @@ All notable changes to this project are tracked in this file.
 
 ## Unreleased
 
+- MYG-19: added a dedicated live-run operator view with stubbed refresh, per-agent progress cards, a richer execution timeline, and an in-place stop confirmation flow for rollback drills. Testing note: run `node --check src/main/resources/static/app.js`.
 - MYG-51: added platform architecture documentation, a persona-based setup guide, and example walkthroughs for latency drills, approval-gated production runs, run analysis, and the HTTP error flow. Testing note: documentation validated against local scripts, controller contracts, and existing route/data fixtures on `main`.
 - MYG-38: added GitHub Actions quality gates for backend verification, static UI smoke checks, and docs/changelog enforcement on pull requests and `main`; added a mainline artifact upload job plus a `make ci-local` wrapper for local pre-push verification.
 - MYG-12: added scoped HTTP error injection runs for `500` and `503` responses, including traffic percentage and route filters, rollback report history, authenticated execution reporting, and audit visibility. Testing note: run `mvn -q -Dtest=CoreSchemaMigrationTest,SafetyGuardrailsServiceTest,RunDispatchControllerTest,ChaosRunServiceTest,AgentExecutionGuardTest test`.
