@@ -142,6 +142,28 @@ Full step-by-step bootstrap, reset, and troubleshooting notes live in `docs/loca
 - RabbitMQ AMQP: `localhost:5672`
 - RabbitMQ UI: `http://localhost:15672` (`chaos` / `chaos`)
 
+## Operator UI routes
+
+The MVP app shell exposes route-specific operator views under the default app URL:
+
+- Dashboard: `http://localhost:8080/`
+- Experiment builder: `http://localhost:8080/experiments/`
+- Live runs: `http://localhost:8080/live-runs/`
+- Results: `http://localhost:8080/results/`
+- History: `http://localhost:8080/history/`
+
+### Experiment builder capabilities
+
+The experiment builder route now supports the current MVP configuration flow for chaos drills:
+
+- Create a new draft or duplicate an existing draft from the route-local catalog.
+- Edit target selectors for service name, namespace, service tags, and environment targeting.
+- Configure either fixed latency injection or HTTP error injection with `500` or `503` responses.
+- Adjust safety constraints before save, including duration limit, rollout strategy, guardrail copy, approval requirement, and environment allowlist coverage.
+- Review the generated save checklist and payload preview before storing a local draft snapshot.
+
+Builder saves are stored in browser local storage, so refreshes preserve the last saved draft set for the current browser profile.
+
 ## Troubleshooting
 
 - If `make run-local` fails with a PostgreSQL connection error, rerun `make bootstrap-local` and wait for the dependency checks to pass.

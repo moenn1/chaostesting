@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'chaos-platform.active-environment';
 const AUTO_REFRESH_KEY = 'chaos-platform.dashboard-auto-refresh';
+const EXPERIMENT_STORAGE_KEY = 'chaos-platform.experiment-builder';
 const DASHBOARD_REFRESH_MS = 15000;
 
 const environments = [
@@ -1262,10 +1263,166 @@ const dashboardSnapshots = {
   ],
 };
 
+const experimentNamespaceOptions = [
+  { value: 'payments', label: 'payments' },
+  { value: 'shop', label: 'shop' },
+  { value: 'fulfillment', label: 'fulfillment' },
+  { value: 'shadow', label: 'shadow' },
+  { value: 'sandbox', label: 'sandbox' },
+];
+
+const experimentTagOptions = [
+  'team:payments',
+  'team:platform',
+  'team:orders',
+  'tier:frontend',
+  'tier:critical',
+  'service-group:checkout',
+  'service-group:inventory',
+  'traffic:shadow',
+];
+
+const experimentRolloutOptions = [
+  { value: 'two-pod-canary', label: 'Two-pod canary' },
+  { value: 'single-service-slice', label: 'Single service slice' },
+  { value: 'namespace-wave', label: 'Namespace wave' },
+  { value: 'synthetic-shadow-only', label: 'Synthetic shadow only' },
+];
+
+const experimentBuilderTemplates = [
+  {
+    id: 'exp-checkout-latency',
+    title: 'Checkout latency envelope',
+    status: 'Guarded',
+    description: 'Inject fixed latency into checkout traffic before the wider staging replay opens up.',
+    target: {
+      service: 'checkout-api',
+      namespace: 'payments',
+      tags: ['team:payments', 'tier:frontend', 'service-group:checkout'],
+      environments: ['staging-west'],
+    },
+    fault: {
+      type: 'latency',
+      latencyMs: 350,
+      statusCode: '500',
+      injectionRate: 30,
+    },
+    safety: {
+      durationMinutes: 8,
+      allowlist: ['staging-west'],
+      approvalRequired: true,
+      guardrail: 'Abort if 5xx stays above 2.5% for 90 seconds.',
+      rollout: 'two-pod-canary',
+    },
+  },
+  {
+    id: 'exp-catalog-cpu',
+    title: 'Catalog fallback latency check',
+    status: 'Stable',
+    description: 'Use a smaller fixed latency profile to verify catalog fallback paths without widening the blast radius.',
+    target: {
+      service: 'catalog-api',
+      namespace: 'shop',
+      tags: ['team:platform', 'tier:critical'],
+      environments: ['local-dev', 'staging-west'],
+    },
+    fault: {
+      type: 'latency',
+      latencyMs: 220,
+      statusCode: '500',
+      injectionRate: 20,
+    },
+    safety: {
+      durationMinutes: 6,
+      allowlist: ['local-dev', 'staging-west'],
+      approvalRequired: false,
+      guardrail: 'Abort if checkout p95 crosses 400ms for two consecutive checks.',
+      rollout: 'single-service-slice',
+    },
+  },
+  {
+    id: 'exp-inventory-packet-loss',
+    title: 'Inventory gateway 503 surge',
+    status: 'Draft',
+    description: 'Shape an MVP HTTP-failure experiment that returns 503s while consumer lag recovery is observed.',
+    target: {
+      service: 'inventory-gateway',
+      namespace: 'fulfillment',
+      tags: ['team:orders', 'service-group:inventory'],
+      environments: ['staging-west'],
+    },
+    fault: {
+      type: 'http-error',
+      latencyMs: 180,
+      statusCode: '503',
+      injectionRate: 18,
+    },
+    safety: {
+      durationMinutes: 10,
+      allowlist: ['staging-west'],
+      approvalRequired: true,
+      guardrail: 'Abort if consumer lag remains above 180 seconds after rollback.',
+      rollout: 'single-service-slice',
+    },
+  },
+  {
+    id: 'exp-shadow-db-saturation',
+    title: 'Shadow API 500 fallback probe',
+    status: 'Approval gated',
+    description: 'Return HTTP 500s on shadow traffic only so rollback speed can be verified before replay promotion.',
+    target: {
+      service: 'shadow-api',
+      namespace: 'shadow',
+      tags: ['team:platform', 'traffic:shadow'],
+      environments: ['prod-shadow'],
+    },
+    fault: {
+      type: 'http-error',
+      latencyMs: 120,
+      statusCode: '500',
+      injectionRate: 12,
+    },
+    safety: {
+      durationMinutes: 5,
+      allowlist: ['prod-shadow'],
+      approvalRequired: true,
+      guardrail: 'Stop if read latency exceeds 220ms for longer than one minute.',
+      rollout: 'synthetic-shadow-only',
+    },
+  },
+  {
+    id: 'exp-local-queue-backlog',
+    title: 'Local queue latency rehearsal',
+    status: 'Sandbox',
+    description: 'Keep the rehearsal path simple while validating the builder flow against the local environment.',
+    target: {
+      service: 'local-queue',
+      namespace: 'sandbox',
+      tags: ['team:platform'],
+      environments: ['local-dev'],
+    },
+    fault: {
+      type: 'latency',
+      latencyMs: 150,
+      statusCode: '500',
+      injectionRate: 40,
+    },
+    safety: {
+      durationMinutes: 4,
+      allowlist: ['local-dev'],
+      approvalRequired: false,
+      guardrail: 'Abort if end-to-end queue wait grows above six minutes.',
+      rollout: 'single-service-slice',
+    },
+  },
+];
+
 const previewState = {
   list: 'loading',
   detail: 'empty',
 };
+
+const builderState = getInitialExperimentBuilderState();
 
 const dashboardState = {
   autoRefreshEnabled: localStorage.getItem(AUTO_REFRESH_KEY) !== 'off',
@@ -1284,6 +1441,13 @@ document.addEventListener('change', (event) => {
   if (target instanceof HTMLSelectElement && target.id === 'environment-select') {
     localStorage.setItem(STORAGE_KEY, target.value);
     render();
+    return;
+  }
+
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+    if (handleExperimentBuilderFieldChange(target)) {
+      renderContent();
+    }
   }
 });
 
@@ -1305,6 +1469,30 @@ document.addEventListener('click', (event) => {
   const actionButton = target.closest('[data-action]');
 
   if (!(actionButton instanceof HTMLElement)) {
+    return;
+  }
+
+  if (actionButton.dataset.action === 'select-experiment-draft') {
+    selectExperimentDraft(actionButton.dataset.draftId);
+    renderContent();
+    return;
+  }
+
+  if (actionButton.dataset.action === 'create-experiment-draft') {
+    createExperimentDraft();
+    renderContent();
+    return;
+  }
+
+  if (actionButton.dataset.action === 'duplicate-experiment-draft') {
+    duplicateExperimentDraft();
+    renderContent();
+    return;
+  }
+
+  if (actionButton.dataset.action === 'save-experiment-draft') {
+    saveExperimentDraft();
+    renderContent();
     return;
   }
 
@@ -1397,6 +1585,11 @@ function renderContent() {
 
   if (routeKey === 'dashboard') {
     contentNode.innerHTML = renderDashboard(environment, route);
+    return;
+  }
+
+  if (routeKey === 'experiments') {
+    contentNode.innerHTML = renderExperimentsRoute(environment, route);
     return;
   }
 
@@ -1531,6 +1724,350 @@ function renderDashboard(environment, route) {
                 .join('')}
             </ul>
           </article>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderExperimentsRoute(environment, route) {
+  const draft = getActiveExperimentDraft();
+  const warnings = getExperimentWarnings(draft);
+  const builderMetrics = getExperimentBuilderMetrics(draft, warnings);
+
+  return `
+    ${renderTopbar(environment)}
+
+    <section class="page">
+      <header class="hero-card">
+        <div class="hero-copy">
+          <p class="hero-kicker">${route.eyebrow}</p>
+          <h2>${route.title}</h2>
+          <p>${route.description}</p>
+          <p class="hero-emphasis">${escapeHtml(getExperimentNarrative(draft))}</p>
+        </div>
+        <div class="hero-actions builder-hero-actions">
+          <div class="hero-context">
+            <span>Active draft</span>
+            <strong>${escapeHtml(draft.title)}</strong>
+            <p class="hero-context-copy">${escapeHtml(getExperimentSaveCopy(warnings))}</p>
+          </div>
+          <div class="refresh-actions">
+            <button type="button" class="ghost-button" data-action="create-experiment-draft">New draft</button>
+            <button type="button" class="ghost-button" data-action="duplicate-experiment-draft">Duplicate draft</button>
+            <button
+              type="button"
+              class="primary-button"
+              data-action="save-experiment-draft"
+              ${warnings.length > 0 ? 'disabled' : ''}
+            >
+              Save draft
+            </button>
+          </div>
+          <div class="builder-save-strip">
+            ${renderStatusChip(draft.status)}
+            <span class="context-pill">${escapeHtml(getExperimentSaveStateLabel())}</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="metric-grid" aria-label="${route.navLabel} builder metrics">
+        ${builderMetrics
+          .map(
+            (metric) => `
+              <article class="metric-card">
+                <p class="metric-label">${metric.label}</p>
+                <h3>${metric.value}</h3>
+                <p class="metric-note">${metric.note}</p>
+              </article>
+            `,
+          )
+          .join('')}
+      </section>
+
+      <section class="builder-shell">
+        <article class="surface-card builder-sidebar">
+          <div class="surface-header">
+            <div>
+              <p class="surface-label">Template catalog</p>
+              <h3>Start from a saved experiment or branch a fresh draft</h3>
+            </div>
+            <span class="context-pill">${padMetric(builderState.drafts.length)} drafts</span>
+          </div>
+          <div class="builder-catalog">
+            ${builderState.drafts.map((builderDraft) => renderExperimentDraftCard(builderDraft)).join('')}
+          </div>
+        </article>
+
+        <div class="builder-main">
+          <article class="surface-card builder-workspace">
+            <div class="surface-header">
+              <div>
+                <p class="surface-label">Experiment composer</p>
+                <h3>${escapeHtml(draft.title)}</h3>
+              </div>
+              <div class="builder-header-meta">
+                ${renderStatusChip(draft.status)}
+                <span class="context-pill">Editing ${escapeHtml(draft.target.service || 'unspecified service')}</span>
+              </div>
+            </div>
+
+            <div class="builder-form-grid">
+              <section class="builder-section">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="section-label">Identity</p>
+                    <h3>Name and describe the draft</h3>
+                  </div>
+                </div>
+                <div class="builder-field-grid">
+                  <label class="builder-field">
+                    <span class="field-label">Experiment name</span>
+                    <input class="builder-input" type="text" data-draft-field="title" value="${escapeHtml(draft.title)}" />
+                  </label>
+                  <label class="builder-field builder-field-wide">
+                    <span class="field-label">Operator context</span>
+                    <input
+                      class="builder-input"
+                      type="text"
+                      data-draft-field="description"
+                      value="${escapeHtml(draft.description)}"
+                    />
+                  </label>
+                </div>
+              </section>
+
+              <section class="builder-section">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="section-label">Target selector</p>
+                    <h3>Scope the service, tags, namespace, and environments</h3>
+                  </div>
+                </div>
+                <div class="builder-field-grid">
+                  <label class="builder-field">
+                    <span class="field-label">Service name</span>
+                    <input
+                      class="builder-input"
+                      type="text"
+                      data-draft-field="target.service"
+                      value="${escapeHtml(draft.target.service)}"
+                    />
+                  </label>
+                  <label class="builder-field">
+                    <span class="field-label">Namespace</span>
+                    <select class="builder-input" data-draft-field="target.namespace">
+                      ${experimentNamespaceOptions
+                        .map(
+                          (option) => `
+                            <option value="${option.value}" ${option.value === draft.target.namespace ? 'selected' : ''}>
+                              ${option.label}
+                            </option>
+                          `,
+                        )
+                        .join('')}
+                    </select>
+                  </label>
+                </div>
+                <div class="builder-choice-block">
+                  <p class="field-label">Target environments</p>
+                  ${renderChipGroup(environments, draft.target.environments, {
+                    arrayField: 'target.environments',
+                    getValue: (item) => item.id,
+                    getLabel: (item) => item.name,
+                  })}
+                </div>
+                <div class="builder-choice-block">
+                  <p class="field-label">Service tags</p>
+                  ${renderChipGroup(experimentTagOptions, draft.target.tags, {
+                    arrayField: 'target.tags',
+                    getValue: (item) => item,
+                    getLabel: (item) => item,
+                  })}
+                </div>
+              </section>
+
+              <section class="builder-section">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="section-label">Fault configuration</p>
+                    <h3>Choose fixed latency or an HTTP 500/503 failure mode</h3>
+                  </div>
+                </div>
+                <div class="builder-choice-block">
+                  <p class="field-label">Fault type</p>
+                  ${renderRadioGroup(
+                    'fault.type',
+                    draft.fault.type,
+                    [
+                      { value: 'latency', label: 'Fixed latency' },
+                      { value: 'http-error', label: 'HTTP error' },
+                    ],
+                  )}
+                </div>
+                <div class="builder-field-grid">
+                  ${
+                    draft.fault.type === 'latency'
+                      ? `
+                        <label class="builder-field">
+                          <span class="field-label">Latency (ms)</span>
+                          <input
+                            class="builder-input"
+                            type="number"
+                            min="25"
+                            step="25"
+                            data-draft-field="fault.latencyMs"
+                            value="${draft.fault.latencyMs}"
+                          />
+                        </label>
+                      `
+                      : `
+                        <div class="builder-field">
+                          <span class="field-label">HTTP status</span>
+                          ${renderRadioGroup(
+                            'fault.statusCode',
+                            String(draft.fault.statusCode),
+                            [
+                              { value: '500', label: 'HTTP 500' },
+                              { value: '503', label: 'HTTP 503' },
+                            ],
+                          )}
+                        </div>
+                      `
+                  }
+                  <label class="builder-field">
+                    <span class="field-label">Traffic share (%)</span>
+                    <input
+                      class="builder-input"
+                      type="number"
+                      min="1"
+                      max="100"
+                      data-draft-field="fault.injectionRate"
+                      value="${draft.fault.injectionRate}"
+                    />
+                  </label>
+                </div>
+              </section>
+
+              <section class="builder-section">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="section-label">Safety constraints</p>
+                    <h3>Keep guardrails and environment allowlists editable before save</h3>
+                  </div>
+                </div>
+                <div class="builder-field-grid">
+                  <label class="builder-field">
+                    <span class="field-label">Duration limit (minutes)</span>
+                    <input
+                      class="builder-input"
+                      type="number"
+                      min="1"
+                      max="30"
+                      data-draft-field="safety.durationMinutes"
+                      value="${draft.safety.durationMinutes}"
+                    />
+                  </label>
+                  <label class="builder-field">
+                    <span class="field-label">Rollout strategy</span>
+                    <select class="builder-input" data-draft-field="safety.rollout">
+                      ${experimentRolloutOptions
+                        .map(
+                          (option) => `
+                            <option value="${option.value}" ${option.value === draft.safety.rollout ? 'selected' : ''}>
+                              ${option.label}
+                            </option>
+                          `,
+                        )
+                        .join('')}
+                    </select>
+                  </label>
+                  <label class="builder-field builder-field-wide">
+                    <span class="field-label">Guardrail / stop condition</span>
+                    <input
+                      class="builder-input"
+                      type="text"
+                      data-draft-field="safety.guardrail"
+                      value="${escapeHtml(draft.safety.guardrail)}"
+                    />
+                  </label>
+                </div>
+                <div class="builder-choice-block">
+                  <p class="field-label">Environment allowlist</p>
+                  ${renderChipGroup(environments, draft.safety.allowlist, {
+                    arrayField: 'safety.allowlist',
+                    getValue: (item) => item.id,
+                    getLabel: (item) => item.name,
+                  })}
+                </div>
+                <label class="builder-toggle">
+                  <input
+                    type="checkbox"
+                    data-draft-field="safety.approvalRequired"
+                    ${draft.safety.approvalRequired ? 'checked' : ''}
+                  />
+                  <span>Require explicit approval before this draft can run outside sandbox scope.</span>
+                </label>
+              </section>
+            </div>
+          </article>
+
+          <div class="surface-grid builder-support-grid">
+            <article class="surface-card">
+              <div class="surface-header">
+                <div>
+                  <p class="surface-label">Save checklist</p>
+                  <h3>${warnings.length === 0 ? 'Draft is ready to save' : 'Resolve safety gaps before save'}</h3>
+                </div>
+                ${renderStatusChip(warnings.length === 0 ? 'Stable' : 'Draft')}
+              </div>
+              <div class="builder-summary-stack">
+                <div class="linked-fact-grid builder-fact-grid">
+                  <div class="linked-fact">
+                    <span>Target selector</span>
+                    <strong>${escapeHtml(getExperimentTargetSummary(draft))}</strong>
+                  </div>
+                  <div class="linked-fact">
+                    <span>Fault profile</span>
+                    <strong>${escapeHtml(getExperimentFaultSummary(draft))}</strong>
+                  </div>
+                  <div class="linked-fact">
+                    <span>Duration</span>
+                    <strong>${draft.safety.durationMinutes} minute max</strong>
+                  </div>
+                  <div class="linked-fact">
+                    <span>Allowlist</span>
+                    <strong>${escapeHtml(formatEnvironmentNames(draft.safety.allowlist))}</strong>
+                  </div>
+                </div>
+                ${
+                  warnings.length === 0
+                    ? `
+                      <div class="builder-callout">
+                        <p class="preview-title">Safety posture aligned</p>
+                        <p class="preview-copy">Target environments, allowlist coverage, and the selected fault mode are all ready for a save.</p>
+                      </div>
+                    `
+                    : `
+                      <ul class="detail-list">
+                        ${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join('')}
+                      </ul>
+                    `
+                }
+              </div>
+            </article>
+
+            <article class="surface-card">
+              <div class="surface-header">
+                <div>
+                  <p class="surface-label">Payload preview</p>
+                  <h3>What the MVP save request would contain</h3>
+                </div>
+                <span class="context-pill">${escapeHtml(draft.fault.type === 'latency' ? 'Latency' : 'HTTP error')}</span>
+              </div>
+              <pre class="builder-code"><code>${escapeHtml(JSON.stringify(getExperimentPayloadPreview(draft), null, 2))}</code></pre>
+            </article>
+          </div>
         </div>
       </section>
     </section>
@@ -1810,6 +2347,86 @@ function renderLinkedDetail(record) {
   `;
 }
 
+function renderExperimentDraftCard(draft) {
+  const activeClass = draft.id === builderState.activeDraftId ? ' active' : '';
+
+  return `
+    <button
+      type="button"
+      class="draft-card${activeClass}"
+      data-action="select-experiment-draft"
+      data-draft-id="${draft.id}"
+    >
+      <div class="draft-card-header">
+        <div>
+          <p class="run-card-eyebrow">${escapeHtml(draft.target.service || 'New draft')}</p>
+          <h3>${escapeHtml(draft.title)}</h3>
+        </div>
+        ${renderStatusChip(draft.status)}
+      </div>
+      <p class="draft-card-copy">${escapeHtml(draft.description)}</p>
+      <div class="meta-row">
+        <span>${escapeHtml(getExperimentFaultSummary(draft))}</span>
+        <span>${draft.safety.durationMinutes}m max</span>
+        <span>${draft.target.environments.length} env</span>
+      </div>
+    </button>
+  `;
+}
+
+function renderChipGroup(options, selectedValues, config) {
+  return `
+    <div class="toggle-group">
+      ${options
+        .map((option) => {
+          const value = config.getValue(option);
+          const label = config.getLabel(option);
+          const activeClass = selectedValues.includes(value) ? ' active' : '';
+
+          return `
+            <label class="toggle-chip${activeClass}">
+              <input
+                class="sr-only"
+                type="checkbox"
+                data-array-field="${config.arrayField}"
+                value="${value}"
+                ${selectedValues.includes(value) ? 'checked' : ''}
+              />
+              <span>${escapeHtml(label)}</span>
+            </label>
+          `;
+        })
+        .join('')}
+    </div>
+  `;
+}
+
+function renderRadioGroup(field, activeValue, options) {
+  return `
+    <div class="toggle-group">
+      ${options
+        .map((option) => {
+          const activeClass = option.value === activeValue ? ' active' : '';
+
+          return `
+            <label class="toggle-chip${activeClass}">
+              <input
+                class="sr-only"
+                type="radio"
+                name="${field}"
+                data-draft-field="${field}"
+                value="${option.value}"
+                ${option.value === activeValue ? 'checked' : ''}
+              />
+              <span>${option.label}</span>
+            </label>
+          `;
+        })
+        .join('')}
+    </div>
+  `;
+}
+
 function renderStateSwitch(surface, activeState) {
   return `
     <div class="state-switch" role="tablist" aria-label="Preview surface states">
@@ -1932,6 +2549,384 @@ function renderStatusChip(label) {
   return `<span class="status-chip ${toToken(label)}">${label}</span>`;
 }
 
+function getInitialExperimentBuilderState() {
+  const stored = loadSavedExperimentState();
+  const drafts = stored?.drafts?.length ? stored.drafts : cloneExperimentDrafts(experimentBuilderTemplates);
+  const activeDraftId = resolveActiveExperimentDraftId(drafts, stored?.activeDraftId);
+
+  return {
+    drafts,
+    activeDraftId,
+    lastSavedAt: stored?.lastSavedAt ? new Date(stored.lastSavedAt) : null,
+    saveState: stored?.lastSavedAt ? 'saved' : 'idle',
+    nextDraftNumber: drafts.length + 1,
+  };
+}
+
+function loadSavedExperimentState() {
+  try {
+    const rawValue = localStorage.getItem(EXPERIMENT_STORAGE_KEY);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsed = JSON.parse(rawValue);
+
+    if (!Array.isArray(parsed.drafts) || parsed.drafts.length === 0) {
+      return null;
+    }
+
+    return parsed;
+  } catch (error) {
+    return null;
+  }
+}
+
+function cloneExperimentDrafts(drafts) {
+  return JSON.parse(JSON.stringify(drafts));
+}
+
+function resolveActiveExperimentDraftId(drafts, storedDraftId) {
+  const requestedDraftId = new URLSearchParams(window.location.search).get('experiment');
+
+  if (requestedDraftId && drafts.some((draft) => draft.id === requestedDraftId)) {
+    return requestedDraftId;
+  }
+
+  if (storedDraftId && drafts.some((draft) => draft.id === storedDraftId)) {
+    return storedDraftId;
+  }
+
+  return drafts[0].id;
+}
+
+function getActiveExperimentDraft() {
+  return builderState.drafts.find((draft) => draft.id === builderState.activeDraftId) || builderState.drafts[0];
+}
+
+function handleExperimentBuilderFieldChange(target) {
+  if (routeKey !== 'experiments') {
+    return false;
+  }
+
+  if (target instanceof HTMLInputElement && target.dataset.arrayField) {
+    updateActiveExperimentDraftArray(target.dataset.arrayField, target.value, target.checked);
+    return true;
+  }
+
+  if (!target.dataset.draftField) {
+    return false;
+  }
+
+  if (target instanceof HTMLInputElement && target.type === 'radio' && !target.checked) {
+    return true;
+  }
+
+  updateActiveExperimentDraftField(target.dataset.draftField, getDraftFieldValue(target));
+  return true;
+}
+
+function getDraftFieldValue(target) {
+  if (target instanceof HTMLInputElement) {
+    if (target.type === 'checkbox') {
+      return target.checked;
+    }
+
+    if (target.type === 'number') {
+      return Number(target.value);
+    }
+  }
+
+  return target.value;
+}
+
+function updateActiveExperimentDraftField(path, value) {
+  const activeDraft = getActiveExperimentDraft();
+  const nextDraft = cloneExperimentDrafts([activeDraft])[0];
+  const keys = path.split('.');
+  let cursor = nextDraft;
+
+  keys.slice(0, -1).forEach((key) => {
+    cursor = cursor[key];
+  });
+
+  cursor[keys[keys.length - 1]] = value;
+  replaceExperimentDraft(nextDraft);
+}
+
+function updateActiveExperimentDraftArray(path, value, checked) {
+  const activeDraft = getActiveExperimentDraft();
+  const nextDraft = cloneExperimentDrafts([activeDraft])[0];
+  const keys = path.split('.');
+  let cursor = nextDraft;
+
+  keys.slice(0, -1).forEach((key) => {
+    cursor = cursor[key];
+  });
+
+  const arrayKey = keys[keys.length - 1];
+  const nextValues = new Set(cursor[arrayKey]);
+
+  if (checked) {
+    nextValues.add(value);
+  } else {
+    nextValues.delete(value);
+  }
+
+  cursor[arrayKey] = Array.from(nextValues);
+  replaceExperimentDraft(nextDraft);
+}
+
+function replaceExperimentDraft(nextDraft) {
+  builderState.drafts = builderState.drafts.map((draft) => (draft.id === nextDraft.id ? nextDraft : draft));
+  builderState.saveState = 'dirty';
+}
+
+function selectExperimentDraft(draftId) {
+  if (!draftId || !builderState.drafts.some((draft) => draft.id === draftId)) {
+    return;
+  }
+
+  builderState.activeDraftId = draftId;
+  syncExperimentLocation(draftId);
+}
+
+function createExperimentDraft() {
+  const activeEnvironment = getActiveEnvironment();
+  const draft = {
+    id: `draft-${builderState.nextDraftNumber}`,
+    title: `New experiment draft ${builderState.nextDraftNumber}`,
+    status: 'Draft',
+    description: 'Start from a blank service selector and tune the fault before saving.',
+    target: {
+      service: '',
+      namespace: experimentNamespaceOptions[0].value,
+      tags: [],
+      environments: [activeEnvironment.id],
+    },
+    fault: {
+      type: 'latency',
+      latencyMs: 150,
+      statusCode: '500',
+      injectionRate: 10,
+    },
+    safety: {
+      durationMinutes: 5,
+      allowlist: [activeEnvironment.id],
+      approvalRequired: activeEnvironment.id === 'prod-shadow',
+      guardrail: 'Add a stop condition before saving this experiment.',
+      rollout: experimentRolloutOptions[1].value,
+    },
+  };
+
+  builderState.nextDraftNumber += 1;
+  builderState.drafts = [draft, ...builderState.drafts];
+  builderState.activeDraftId = draft.id;
+  builderState.saveState = 'dirty';
+  syncExperimentLocation(draft.id);
+}
+
+function duplicateExperimentDraft() {
+  const source = getActiveExperimentDraft();
+  const duplicate = cloneExperimentDrafts([source])[0];
+
+  duplicate.id = `draft-${builderState.nextDraftNumber}`;
+  duplicate.title = `${source.title} copy`;
+  duplicate.status = 'Draft';
+
+  builderState.nextDraftNumber += 1;
+  builderState.drafts = [duplicate, ...builderState.drafts];
+  builderState.activeDraftId = duplicate.id;
+  builderState.saveState = 'dirty';
+  syncExperimentLocation(duplicate.id);
+}
+
+function saveExperimentDraft() {
+  if (getExperimentWarnings(getActiveExperimentDraft()).length > 0) {
+    return;
+  }
+
+  builderState.lastSavedAt = new Date();
+  builderState.saveState = 'saved';
+
+  localStorage.setItem(
+    EXPERIMENT_STORAGE_KEY,
+    JSON.stringify({
+      drafts: builderState.drafts,
+      activeDraftId: builderState.activeDraftId,
+      lastSavedAt: builderState.lastSavedAt.toISOString(),
+    }),
+  );
+}
+
+function syncExperimentLocation(draftId) {
+  const url = new URL(window.location.href);
+
+  url.searchParams.set('experiment', draftId);
+  window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+}
+
+function getExperimentWarnings(draft) {
+  const warnings = [];
+  const serviceName = draft.target.service.trim();
+  const durationMinutes = Number(draft.safety.durationMinutes);
+  const injectionRate = Number(draft.fault.injectionRate);
+
+  if (!draft.title.trim()) {
+    warnings.push('Add an experiment name before saving.');
+  }
+
+  if (!serviceName) {
+    warnings.push('Choose a service name for the target selector.');
+  }
+
+  if (!draft.target.namespace) {
+    warnings.push('Choose a namespace for the target selector.');
+  }
+
+  if (draft.target.tags.length === 0) {
+    warnings.push('Select at least one service tag.');
+  }
+
+  if (draft.target.environments.length === 0) {
+    warnings.push('Select at least one target environment.');
+  }
+
+  if (!Number.isFinite(durationMinutes) || durationMinutes < 1 || durationMinutes > 30) {
+    warnings.push('Duration limit must stay between 1 and 30 minutes.');
+  }
+
+  if (!Number.isFinite(injectionRate) || injectionRate < 1 || injectionRate > 100) {
+    warnings.push('Traffic share must stay between 1% and 100%.');
+  }
+
+  if (draft.fault.type === 'latency' && (!Number.isFinite(draft.fault.latencyMs) || draft.fault.latencyMs < 25)) {
+    warnings.push('Latency injection must be at least 25ms.');
+  }
+
+  if (draft.fault.type === 'http-error' && !['500', '503'].includes(String(draft.fault.statusCode))) {
+    warnings.push('HTTP fault selection is limited to 500 or 503.');
+  }
+
+  if (draft.safety.allowlist.length === 0) {
+    warnings.push('Allowlist at least one environment before save.');
+  }
+
+  const missingAllowlistEntries = draft.target.environments.filter(
+    (environmentId) => !draft.safety.allowlist.includes(environmentId),
+  );
+
+  if (missingAllowlistEntries.length > 0) {
+    warnings.push(`Add ${formatEnvironmentNames(missingAllowlistEntries)} to the safety allowlist.`);
+  }
+
+  if (!draft.safety.guardrail.trim()) {
+    warnings.push('Document a guardrail or stop condition before save.');
+  }
+
+  return warnings;
+}
+
+function getExperimentBuilderMetrics(draft, warnings) {
+  return [
+    {
+      label: 'Workspace drafts',
+      value: padMetric(builderState.drafts.length),
+      note: 'Saved templates and unsaved branches stay in the same builder workspace.',
+    },
+    {
+      label: 'Selectors armed',
+      value: padMetric(draft.target.tags.length + draft.target.environments.length + (draft.target.service ? 1 : 0)),
+      note: 'Service name, tags, namespace, and environment targeting stay editable together.',
+    },
+    {
+      label: 'Save posture',
+      value: warnings.length === 0 ? 'Ready' : `-${warnings.length}`,
+      note:
+        warnings.length === 0
+          ? 'Allowlist coverage and guardrails align for the current draft.'
+          : warnings[0],
+    },
+  ];
+}
+
+function getExperimentSaveStateLabel() {
+  if (builderState.saveState === 'saved' && builderState.lastSavedAt) {
+    return `Saved locally at ${formatTime(builderState.lastSavedAt)}`;
+  }
+
+  if (builderState.saveState === 'dirty') {
+    return 'Unsaved changes in the current workspace';
+  }
+
+  return 'No saved draft snapshot yet';
+}
+
+function getExperimentSaveCopy(warnings) {
+  if (warnings.length === 0) {
+    return 'Selectors, fault controls, and safety constraints are aligned for a local save.';
+  }
+
+  return `${warnings.length} checklist item${warnings.length === 1 ? '' : 's'} still need review before save.`;
+}
+
+function getExperimentNarrative(draft) {
+  const target = getExperimentTargetSummary(draft);
+  const fault = getExperimentFaultSummary(draft);
+  return `${fault} targeting ${target}.`;
+}
+
+function getExperimentTargetSummary(draft) {
+  return `${draft.target.service || 'unassigned service'} in ${draft.target.namespace} across ${formatEnvironmentNames(draft.target.environments)}`;
+}
+
+function getExperimentFaultSummary(draft) {
+  if (draft.fault.type === 'latency') {
+    return `${draft.fault.latencyMs}ms fixed latency at ${draft.fault.injectionRate}% traffic`;
+  }
+
+  return `HTTP ${draft.fault.statusCode} at ${draft.fault.injectionRate}% traffic`;
+}
+
+function formatEnvironmentNames(environmentIds) {
+  return environmentIds
+    .map((environmentId) => environments.find((environment) => environment.id === environmentId)?.name || environmentId)
+    .join(', ');
+}
+
+function getExperimentPayloadPreview(draft) {
+  return {
+    name: draft.title,
+    description: draft.description,
+    target: {
+      service: draft.target.service,
+      namespace: draft.target.namespace,
+      tags: draft.target.tags,
+      environments: draft.target.environments,
+    },
+    fault:
+      draft.fault.type === 'latency'
+        ? {
+            type: 'latency',
+            latencyMs: draft.fault.latencyMs,
+            trafficSharePercent: draft.fault.injectionRate,
+          }
+        : {
+            type: 'http-error',
+            statusCode: Number(draft.fault.statusCode),
+            trafficSharePercent: draft.fault.injectionRate,
+          },
+    safety: {
+      durationMinutes: draft.safety.durationMinutes,
+      environmentAllowlist: draft.safety.allowlist,
+      approvalRequired: draft.safety.approvalRequired,
+      guardrail: draft.safety.guardrail,
+      rollout: draft.safety.rollout,
+    },
+  };
+}
+
 function getActiveEnvironment() {
   const savedEnvironmentId = localStorage.getItem(STORAGE_KEY) || environments[1].id;
 
@@ -1952,4 +2947,13 @@ function padMetric(value) {
 
 function toToken(value) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
