@@ -4,6 +4,7 @@ All notable changes to this project are tracked in this file.
 
 ## Unreleased
 
+- MYG-36: added backend support for `process_kill` and `service_pause` fault actions across experiment validation, manual dispatch guardrails, run lifecycle messaging, seeded local agent capabilities, and operator walkthroughs. Testing note: run `mvn -q test` or `make test-local` to cover experiment, safety, and lifecycle controller flows.
 - MYG-19: added a dedicated live-run operator view with stubbed refresh, per-agent progress cards, a richer execution timeline, and an in-place stop confirmation flow for rollback drills. Testing note: run `node --check src/main/resources/static/app.js`.
 - MYG-50: added traffic-shaping fault support for jittered or bounded latency profiles plus request-drop runs, including guardrail validation, run telemetry, rollback metadata, and experiment-template validation for the new parameter shapes. Testing note: run `mvn -q -Dtest=CoreSchemaMigrationTest,SafetyGuardrailsServiceTest,RunDispatchControllerTest,ChaosRunServiceTest,AgentExecutionGuardTest test`.
 - MYG-51: added platform architecture documentation, a persona-based setup guide, and example walkthroughs for latency drills, approval-gated production runs, run analysis, and the HTTP error flow. Testing note: documentation validated against local scripts, controller contracts, and existing route/data fixtures on `main`.

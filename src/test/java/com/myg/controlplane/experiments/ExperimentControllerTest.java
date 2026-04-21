@@ -213,6 +213,25 @@ class ExperimentControllerTest {
     }
 
     @Test
+    void supportsParameterlessProcessKillAndServicePauseExperiments() throws Exception {
+        mockMvc.perform(as(post("/api/experiments"), "operator-demo", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(processKillExperimentPayload()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.faultConfig.type").value("process_kill"))
+                .andExpect(jsonPath("$.faultConfig.durationSeconds").value(120))
+                .andExpect(jsonPath("$.faultConfig.parameters").isEmpty());
+
+        mockMvc.perform(as(post("/api/experiments"), "operator-demo", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(servicePauseExperimentPayload()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.faultConfig.type").value("service_pause"))
+                .andExpect(jsonPath("$.faultConfig.durationSeconds").value(180))
+                .andExpect(jsonPath("$.faultConfig.parameters").isEmpty());
+    }
+
+    @Test
     void viewerCanReadButCannotMutateExperiments() throws Exception {
         mockMvc.perform(as(post("/api/experiments"), "operator-demo", "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -448,6 +467,66 @@ class ExperimentControllerTest {
                     "environment": "staging",
                     "region": "us-phoenix-1",
                     "team": "payments"
+                  }
+                }
+                """;
+    }
+
+    private static String processKillExperimentPayload() {
+        return """
+                {
+                  "name": "Checkout worker restart drill",
+                  "description": "Kill the checkout worker process and verify automatic recovery within the rollback window.",
+                  "targetSelector": {
+                    "service": "checkout-worker",
+                    "namespace": "payments",
+                    "tags": ["checkout", "recovery"]
+                  },
+                  "faultConfig": {
+                    "type": "process_kill",
+                    "durationSeconds": 120,
+                    "parameters": {}
+                  },
+                  "safetyRules": {
+                    "abortConditions": ["Abort if worker recovery exceeds 60 seconds"],
+                    "maxAffectedTargets": 1,
+                    "approvalRequired": false,
+                    "rollbackMode": "automatic"
+                  },
+                  "environmentMetadata": {
+                    "environment": "staging",
+                    "region": "us-phoenix-1",
+                    "team": "payments"
+                  }
+                }
+                """;
+    }
+
+    private static String servicePauseExperimentPayload() {
+        return """
+                {
+                  "name": "Inventory pause window",
+                  "description": "Pause the inventory daemon briefly and verify that cleanup restores normal processing.",
+                  "targetSelector": {
+                    "service": "inventory-daemon",
+                    "namespace": "fulfillment",
+                    "tags": ["inventory", "pause"]
+                  },
+                  "faultConfig": {
+                    "type": "service_pause",
+                    "durationSeconds": 180,
+                    "parameters": {}
+                  },
+                  "safetyRules": {
+                    "abortConditions": ["Abort if queue lag exceeds 90 seconds"],
+                    "maxAffectedTargets": 1,
+                    "approvalRequired": false,
+                    "rollbackMode": "automatic"
+                  },
+                  "environmentMetadata": {
+                    "environment": "staging",
+                    "region": "us-ashburn-1",
+                    "team": "fulfillment"
                   }
                 }
                 """;

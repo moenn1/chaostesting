@@ -2,7 +2,7 @@
 
 These walkthroughs are organized by what the current branch can prove today.
 
-- API-backed today: staging latency drills, approval-gated production latency drills, run analysis, audit reads, and agent lifecycle checks.
+- API-backed today: staging latency drills, approval-gated production latency drills, process-kill drills, timed service pauses, run analysis, audit reads, and agent lifecycle checks.
 - Demo-only today: the HTTP error experiment builder route and payload preview.
 - Not wired yet: a live RabbitMQ-backed execution bus and a backend-verified HTTP error dispatch lifecycle.
 
@@ -315,3 +315,109 @@ This is the recommended demo path for HTTP error scenarios on the current branch
 ### Current limitation
 
 Do not present this as a live backend execution proof yet. The dispatch contract and telemetry model are still latency-oriented, so the repo is ready for HTTP error authoring and demo review, but not for a backend-verified HTTP error run lifecycle.
+
+## Walkthrough 4: process kill and timed service pause lifecycle
+
+These actions now use the backend dispatch lifecycle directly. They reuse the existing run API, but the run status and telemetry messages are action-specific so operators can distinguish activation from verified cleanup.
+
+### 1. Validate and dispatch a process kill run
+
+```bash
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/safety/dispatches \
+  -d '{
+    "targetEnvironment":"staging",
+    "targetSelector":"checkout-worker",
+    "faultType":"process_kill",
+    "requestedDurationSeconds":120,
+    "requestedBy":"operator-demo"
+  }'
+```
+
+Expected response shape:
+
+- `status`: `AUTHORIZED`
+- `faultType`: `process_kill`
+- `targetSelector`: `checkout-worker`
+
+Inspect the run immediately after dispatch:
+
+```bash
+curl -s \
+  -H 'X-Chaos-Dev-User: viewer-demo' \
+  -H 'X-Chaos-Dev-Roles: VIEWER' \
+  http://localhost:8080/safety/runs/<dispatch-id>
+```
+
+Expected run fields:
+
+- `status`: `ACTIVE`
+- `statusMessage`: `Process kill action issued for target checkout-worker; awaiting recovery verification.`
+
+### 2. Stop the process kill run after recovery is verified
+
+```bash
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: ops-oncall' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/safety/runs/<dispatch-id>/stop \
+  -d '{
+    "reason":"recovery validated"
+  }'
+```
+
+Expected results:
+
+- run `status`: `ROLLED_BACK`
+- `statusMessage`: `Process recovery verified after recovery validated.`
+- latest telemetry `message`: `Process recovery verified after recovery validated.`
+
+### 3. Dispatch a timed service pause run
+
+```bash
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'X-Chaos-Dev-User: operator-demo' \
+  -H 'X-Chaos-Dev-Roles: OPERATOR' \
+  http://localhost:8080/safety/dispatches \
+  -d '{
+    "targetEnvironment":"staging",
+    "targetSelector":"inventory-daemon",
+    "faultType":"service_pause",
+    "requestedDurationSeconds":180,
+    "requestedBy":"operator-demo"
+  }'
+```
+
+Expected run fields after dispatch:
+
+- `status`: `ACTIVE`
+- `statusMessage`: `Timed service pause active for target inventory-daemon.`
+
+After the scheduled duration or a manual stop, expect the rollback message to shift to:
+
+- `Timed service pause cleanup verified after <reason>.`
+
+### 4. Confirm the local agent catalog exposes the new capabilities
+
+```bash
+curl -s \
+  -H 'X-Chaos-Dev-User: viewer-demo' \
+  -H 'X-Chaos-Dev-Roles: VIEWER' \
+  "http://localhost:8080/agents?capability=process_kill"
+```
+
+```bash
+curl -s \
+  -H 'X-Chaos-Dev-User: viewer-demo' \
+  -H 'X-Chaos-Dev-Roles: VIEWER' \
+  "http://localhost:8080/agents?capability=service_pause"
+```
+
+Expected result:
+
+- at least one agent record for each capability in the seeded local catalog

@@ -104,6 +104,39 @@ class RunDispatchControllerTest {
     }
 
     @Test
+    void validatesProcessKillAndTimedServicePauseDispatches() throws Exception {
+        mockMvc.perform(as(post("/safety/dispatches/validate"), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "checkout-worker",
+                                  "faultType": "process_kill",
+                                  "requestedDurationSeconds": 120,
+                                  "requestedBy": "experiment-operator"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decision").value("ALLOWED"))
+                .andExpect(jsonPath("$.violations", hasSize(0)));
+
+        mockMvc.perform(as(post("/safety/dispatches/validate"), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "inventory-daemon",
+                                  "faultType": "service_pause",
+                                  "requestedDurationSeconds": 180,
+                                  "requestedBy": "experiment-operator"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decision").value("ALLOWED"))
+                .andExpect(jsonPath("$.violations", hasSize(0)));
+    }
+
+    @Test
     void validatesRandomLatencyDispatchesWithEitherJitterOrBounds() throws Exception {
         mockMvc.perform(as(post("/safety/dispatches/validate"), "experiment-operator", "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -318,6 +351,47 @@ class RunDispatchControllerTest {
     }
 
     @Test
+    void processKillDispatchReportsRecoveryMessagingThroughRunAndTelemetry() throws Exception {
+        MvcResult dispatch = mockMvc.perform(as(post("/safety/dispatches"), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "checkout-worker",
+                                  "faultType": "process_kill",
+                                  "requestedDurationSeconds": 120,
+                                  "requestedBy": "experiment-operator"
+                                }
+                                """))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        String runId = readField(dispatch.getResponse().getContentAsString(), "dispatchId");
+
+        mockMvc.perform(as(get("/safety/runs/{runId}", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.statusMessage").value("Process kill against checkout-worker activated."));
+
+        mockMvc.perform(as(post("/safety/runs/{runId}/stop", runId), "ops-oncall", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "recovery validated"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ROLLED_BACK"))
+                .andExpect(jsonPath("$.statusMessage").value("Process recovery verified after recovery validated."));
+
+        mockMvc.perform(as(get("/safety/runs/{runId}/telemetry", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].message").value("Process recovery verified after recovery validated."))
+                .andExpect(jsonPath("$[1].message").value("Process kill against checkout-worker activated."));
+    }
+
+    @Test
     void enablingKillSwitchStopsActiveRunsAndWritesAuditMetadata() throws Exception {
         String runId = dispatchLatencyRun();
         clock.advanceSeconds(1);
@@ -400,6 +474,24 @@ class RunDispatchControllerTest {
                 .andExpect(jsonPath("$.runId").value(runId))
                 .andExpect(jsonPath("$.currentStatus").value("ROLLED_BACK"))
                 .andExpect(jsonPath("$.stoppableStatuses[0]").value("ACTIVE"));
+    }
+
+    @Test
+    void rejectsUnsupportedManualDispatchFaultTypes() throws Exception {
+        mockMvc.perform(as(post("/safety/dispatches/validate"), "experiment-operator", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "targetEnvironment": "staging",
+                                  "targetSelector": "inventory-daemon",
+                                  "faultType": "consumer_pause",
+                                  "requestedDurationSeconds": 180,
+                                  "requestedBy": "experiment-operator"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decision").value("REJECTED"))
+                .andExpect(jsonPath("$.violations[0].code").value("UNSUPPORTED_FAULT_TYPE"));
     }
 
     @Test
