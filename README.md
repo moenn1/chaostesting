@@ -26,7 +26,7 @@ The default claim mapping expects:
 
 Route permissions are enforced consistently across the control plane:
 
-- `VIEWER`: dashboard and static UI routes, `/auth/me`, audit history, run status, kill-switch status, agent read APIs, and `GET /api/experiments`.
+- `VIEWER`: dashboard and static UI routes, including `/experiments/**`, `/live-runs/**`, `/results/**`, `/history/**`, and `/fleet/**`, plus `/auth/me`, audit history, run status, kill-switch status, agent read APIs, and `GET /api/experiments`.
 - `OPERATOR`: experiment CRUD writes, `POST /api/experiments/{experimentId}/runs`, dispatch validation, run authorization, and `/safety/runs/{runId}/stop`.
 - `APPROVER`: `/safety/approvals`.
 - `ADMIN`: kill-switch enable and disable, plus all viewer/operator/approver capabilities.

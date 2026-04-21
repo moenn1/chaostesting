@@ -29,7 +29,7 @@ public class SecurityConfiguration {
                 .requestMatchers(HttpMethod.POST, "/agents/register", "/agents/heartbeat").permitAll()
                 .requestMatchers(PathRequest.toH2Console()).hasAuthority(ChaosAuthority.ADMIN)
                 .requestMatchers(HttpMethod.GET, "/", "/index.html", "/app.js", "/styles.css").hasAuthority(ChaosAuthority.VIEW)
-                .requestMatchers(HttpMethod.GET, "/experiments/**", "/live-runs/**", "/results/**", "/history/**", "/agents/**")
+                .requestMatchers(HttpMethod.GET, "/experiments/**", "/live-runs/**", "/results/**", "/history/**", "/fleet/**", "/agents/**")
                 .hasAuthority(ChaosAuthority.VIEW)
                 .requestMatchers(HttpMethod.GET, "/api/experiments", "/api/experiments/*").hasAuthority(ChaosAuthority.VIEW)
                 .requestMatchers(HttpMethod.GET, "/audit/events", "/safety/audit-records", "/safety/runs", "/safety/kill-switch", "/auth/me")

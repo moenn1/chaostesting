@@ -59,7 +59,9 @@ Or, if the headers are absent, the configured default local user.
 - `GET /live-runs/**`
 - `GET /results/**`
 - `GET /history/**`
-- `GET /agents/**`
+- `GET /fleet/**`
+- `GET /agents`
+- `GET /agents/{agentId}`
 - `GET /api/experiments`
 - `GET /api/experiments/{experimentId}`
 - `GET /audit/events`

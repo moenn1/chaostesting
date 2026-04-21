@@ -161,8 +161,8 @@ const routes = {
     detailErrorMessage: 'Historical details failed to load for the selected run.',
   },
   agents: {
-    path: '/agents/',
-    navLabel: 'Agents',
+    path: '/fleet/',
+    navLabel: 'Fleet',
     eyebrow: 'Fleet detail',
     title: 'Inspect the agent fleet that carries each experiment',
     description:
@@ -217,7 +217,7 @@ const linkedDetails = {
         ],
         links: [
           { href: '/live-runs/?run=run-stg-401', label: 'Open linked live run' },
-          { href: '/agents/?agent=agent-stg-07', label: 'Inspect lead agent' },
+          { href: '/fleet/?agent=agent-stg-07', label: 'Inspect lead agent' },
         ],
       },
       'exp-catalog-cpu': {
@@ -257,7 +257,7 @@ const linkedDetails = {
         ],
         links: [
           { href: '/results/?result=result-stg-392', label: 'Open failed result' },
-          { href: '/agents/?agent=agent-stg-07', label: 'Inspect linked agent' },
+          { href: '/fleet/?agent=agent-stg-07', label: 'Inspect linked agent' },
         ],
       },
       'exp-shadow-db-saturation': {
@@ -276,7 +276,7 @@ const linkedDetails = {
           'Agent links land on the dedicated fleet detail view so operators can inspect lease health before promoting.',
         ],
         links: [
-          { href: '/agents/?agent=agent-prod-02', label: 'Inspect shadow agent' },
+          { href: '/fleet/?agent=agent-prod-02', label: 'Inspect shadow agent' },
           { href: '/', label: 'Return to dashboard' },
         ],
       },
@@ -322,7 +322,7 @@ const linkedDetails = {
         ],
         links: [
           { href: '/experiments/?experiment=exp-local-queue-backlog', label: 'View experiment' },
-          { href: '/agents/?agent=agent-dev-01', label: 'Inspect lead agent' },
+          { href: '/fleet/?agent=agent-dev-01', label: 'Inspect lead agent' },
         ],
       },
       'run-dev-119': {
@@ -342,7 +342,7 @@ const linkedDetails = {
         ],
         links: [
           { href: '/experiments/?experiment=exp-catalog-cpu', label: 'View experiment' },
-          { href: '/agents/?agent=agent-dev-01', label: 'Inspect linked agent' },
+          { href: '/fleet/?agent=agent-dev-01', label: 'Inspect linked agent' },
         ],
       },
       'run-stg-401': {
@@ -362,7 +362,7 @@ const linkedDetails = {
         ],
         links: [
           { href: '/experiments/?experiment=exp-checkout-latency', label: 'View experiment' },
-          { href: '/agents/?agent=agent-stg-07', label: 'Inspect lead agent' },
+          { href: '/fleet/?agent=agent-stg-07', label: 'Inspect lead agent' },
         ],
       },
       'run-stg-402': {
@@ -382,7 +382,7 @@ const linkedDetails = {
         ],
         links: [
           { href: '/experiments/?experiment=exp-checkout-latency', label: 'View experiment' },
-          { href: '/agents/?agent=agent-stg-03', label: 'Inspect lead agent' },
+          { href: '/fleet/?agent=agent-stg-03', label: 'Inspect lead agent' },
         ],
       },
       'run-stg-403': {
@@ -422,7 +422,7 @@ const linkedDetails = {
         ],
         links: [
           { href: '/experiments/?experiment=exp-shadow-db-saturation', label: 'View experiment' },
-          { href: '/agents/?agent=agent-prod-02', label: 'Inspect agent' },
+          { href: '/fleet/?agent=agent-prod-02', label: 'Inspect agent' },
         ],
       },
     },
@@ -467,7 +467,7 @@ const linkedDetails = {
         ],
         links: [
           { href: '/experiments/?experiment=exp-inventory-packet-loss', label: 'View experiment' },
-          { href: '/agents/?agent=agent-stg-07', label: 'Inspect linked agent' },
+          { href: '/fleet/?agent=agent-stg-07', label: 'Inspect linked agent' },
         ],
       },
       'result-prod-208': {
@@ -487,7 +487,7 @@ const linkedDetails = {
         ],
         links: [
           { href: '/experiments/?experiment=exp-shadow-db-saturation', label: 'View experiment' },
-          { href: '/agents/?agent=agent-prod-02', label: 'Inspect agent' },
+          { href: '/fleet/?agent=agent-prod-02', label: 'Inspect agent' },
         ],
       },
       'result-dev-122': {
@@ -675,7 +675,7 @@ const dashboardSnapshots = {
         'Local Dev keeps a compact queue so shell changes can be rehearsed without waiting on guarded approvals.',
       watchlist: [
         { label: 'Queue backlog rehearsal is ready for another pass.', href: '/experiments/?experiment=exp-local-queue-backlog' },
-        { label: 'Local sandbox agent remains the cleanest reference fleet node.', href: '/agents/?agent=agent-dev-01' },
+        { label: 'Local sandbox agent remains the cleanest reference fleet node.', href: '/fleet/?agent=agent-dev-01' },
       ],
       activeRuns: [
         {
@@ -769,7 +769,7 @@ const dashboardSnapshots = {
         'Local Dev advanced one queue drill into recovery, which makes the refresh timestamp useful even without backend wiring.',
       watchlist: [
         { label: 'Local queue drill is near completion and safe to rerun.', href: '/live-runs/?run=run-dev-118' },
-        { label: 'The local agent remains a stable reference node.', href: '/agents/?agent=agent-dev-01' },
+        { label: 'The local agent remains a stable reference node.', href: '/fleet/?agent=agent-dev-01' },
       ],
       activeRuns: [
         {
@@ -852,7 +852,7 @@ const dashboardSnapshots = {
         'Staging West is carrying the live operator load, so dashboard links need to land on concrete detail views, not placeholders.',
       watchlist: [
         { label: 'Prod Shadow approval is still pending before replay expansion.', href: '/experiments/?experiment=exp-shadow-db-saturation' },
-        { label: 'agent-stg-07 still shows heartbeat jitter after a node restart.', href: '/agents/?agent=agent-stg-07' },
+        { label: 'agent-stg-07 still shows heartbeat jitter after a node restart.', href: '/fleet/?agent=agent-stg-07' },
         { label: 'Inventory packet loss remains the single failed drill on deck.', href: '/results/?result=result-stg-392' },
       ],
       activeRuns: [
@@ -991,7 +991,7 @@ const dashboardSnapshots = {
         'The refresh state advanced one live run and tightened the degraded heartbeat, so operators can see the dashboard reacting over time.',
       watchlist: [
         { label: 'Checkout retry storm cleared approval and resumed execution.', href: '/live-runs/?run=run-stg-402' },
-        { label: 'The degraded coordinator still needs a fleet-level follow-up.', href: '/agents/?agent=agent-stg-07' },
+        { label: 'The degraded coordinator still needs a fleet-level follow-up.', href: '/fleet/?agent=agent-stg-07' },
         { label: 'Failed inventory rollback remains pinned for review.', href: '/results/?result=result-stg-392' },
       ],
       activeRuns: [
@@ -1132,7 +1132,7 @@ const dashboardSnapshots = {
         'Prod Shadow stays intentionally quiet, but the dashboard still needs to surface approval posture, recent stopped outcomes, and lead-agent links.',
       watchlist: [
         { label: 'Shadow DB saturation is still approval gated before wider replay.', href: '/experiments/?experiment=exp-shadow-db-saturation' },
-        { label: 'agent-prod-02 is the lead runner for the approval hold.', href: '/agents/?agent=agent-prod-02' },
+        { label: 'agent-prod-02 is the lead runner for the approval hold.', href: '/fleet/?agent=agent-prod-02' },
       ],
       activeRuns: [
         {
@@ -1203,7 +1203,7 @@ const dashboardSnapshots = {
         'Refresh only nudged the approval-hold progress here, but that is enough for an operator to see the dashboard timestamp and state controls working together.',
       watchlist: [
         { label: 'Approval hold still blocks wider shadow replay.', href: '/live-runs/?run=run-prod-102' },
-        { label: 'The guarded runner remains the key agent to inspect before promotion.', href: '/agents/?agent=agent-prod-02' },
+        { label: 'The guarded runner remains the key agent to inspect before promotion.', href: '/fleet/?agent=agent-prod-02' },
       ],
       activeRuns: [
         {
@@ -2873,7 +2873,7 @@ function renderRunCard(run) {
       <div class="link-row">
         <a class="resource-link" href="/live-runs/?run=${run.id}">Open run</a>
         <a class="resource-link" href="/experiments/?experiment=${run.experimentId}">View experiment</a>
-        <a class="resource-link" href="/agents/?agent=${run.leadAgentId}">Inspect agent</a>
+        <a class="resource-link" href="/fleet/?agent=${run.leadAgentId}">Inspect agent</a>
       </div>
     </article>
   `;
@@ -2919,7 +2919,7 @@ function renderFailureCard(result) {
       <div class="link-row">
         <a class="resource-link" href="/results/?result=${result.id}">Open failed result</a>
         <a class="resource-link" href="/experiments/?experiment=${result.experimentId}">View experiment</a>
-        <a class="resource-link" href="/agents/?agent=${result.agentId}">Inspect agent</a>
+        <a class="resource-link" href="/fleet/?agent=${result.agentId}">Inspect agent</a>
       </div>
     </article>
   `;
@@ -2948,7 +2948,7 @@ function renderAgentCard(agent) {
       </div>
       <p class="run-note">${agent.summary}</p>
       <div class="link-row">
-        <a class="resource-link" href="/agents/?agent=${agent.id}">Open agent detail</a>
+        <a class="resource-link" href="/fleet/?agent=${agent.id}">Open agent detail</a>
         <a class="resource-link" href="/live-runs/?run=${agent.linkedRunId}">Linked run</a>
       </div>
     </article>
@@ -3143,7 +3143,7 @@ function getDashboardMetrics(snapshot) {
       label: 'Agent health',
       value: `${snapshot.summary.healthyAgents}/${snapshot.summary.totalAgents}`,
       note: snapshot.summary.agentNote,
-      href: snapshot.agents[0] ? `/agents/?agent=${snapshot.agents[0].id}` : '/agents/',
+      href: snapshot.agents[0] ? `/fleet/?agent=${snapshot.agents[0].id}` : '/fleet/',
     },
   ];
 }
