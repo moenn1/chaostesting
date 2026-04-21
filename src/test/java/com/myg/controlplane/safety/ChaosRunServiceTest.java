@@ -268,6 +268,65 @@ class ChaosRunServiceTest {
                 .containsExactly("request_drop", "request_drop");
     }
 
+    @Test
+    void processKillRunsSkipPeriodicTelemetryAndPersistRecoveryMessages() {
+        UUID runId = UUID.randomUUID();
+        DispatchAuthorizationResponse authorization = new DispatchAuthorizationResponse(
+                runId,
+                "AUTHORIZED",
+                "staging",
+                "checkout-worker",
+                "process_kill",
+                90,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                clock.instant()
+        );
+        RunDispatchRequest request = new RunDispatchRequest(
+                "staging",
+                "checkout-worker",
+                "process_kill",
+                90,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                "experiment-operator"
+        );
+        ArgumentCaptor<Runnable> rollbackTaskCaptor = ArgumentCaptor.forClass(Runnable.class);
+        ArgumentCaptor<LatencyTelemetrySnapshotEntity> telemetryCaptor =
+                ArgumentCaptor.forClass(LatencyTelemetrySnapshotEntity.class);
+
+        chaosRunService.startAuthorizedRun(authorization, request);
+
+        verify(taskScheduler, Mockito.never()).scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class));
+        verify(taskScheduler).schedule(rollbackTaskCaptor.capture(), any(Instant.class));
+
+        clock.advanceSeconds(91);
+        rollbackTaskCaptor.getValue().run();
+
+        verify(latencyTelemetrySnapshotJpaRepository, Mockito.times(2)).save(telemetryCaptor.capture());
+        assertThat(telemetryCaptor.getAllValues())
+                .extracting(LatencyTelemetrySnapshotEntity::toDomain)
+                .extracting(LatencyTelemetrySnapshot::message)
+                .containsExactly(
+                        "Process kill against checkout-worker activated.",
+                        "Process recovery verified after requested duration elapsed."
+                );
+    }
+
     private static final class MutableClock extends Clock {
         private Instant instant;
         private final ZoneId zoneId;

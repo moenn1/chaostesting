@@ -42,7 +42,7 @@ The bootstrap script provisions:
 - RabbitMQ AMQP on `localhost:5672`
 - RabbitMQ management UI on `http://localhost:15672`
 
-PostgreSQL is initialized from [`infra/postgres/init/01_schema.sql`](../infra/postgres/init/01_schema.sql) and [`infra/postgres/init/02_sample_agents.sql`](../infra/postgres/init/02_sample_agents.sql). Those scripts only establish the sample agent seed needed before the app starts. The control-plane schema itself is owned by Flyway migrations in `src/main/resources/db/migration`, which run automatically when the service boots.
+PostgreSQL is initialized from [`infra/postgres/init/01_schema.sql`](../infra/postgres/init/01_schema.sql) and [`infra/postgres/init/02_sample_agents.sql`](../infra/postgres/init/02_sample_agents.sql). Those scripts establish the sample agent seed needed before the app starts, including `process_kill` and `service_pause` capabilities for the execution-lifecycle walkthroughs. The control-plane schema itself is owned by Flyway migrations in `src/main/resources/db/migration`, which run automatically when the service boots.
 
 ## Contributor setup
 
@@ -104,7 +104,7 @@ curl -s -X POST \
     "hostname":"developer-macbook",
     "environment":"staging",
     "region":"local",
-    "supportedFaultCapabilities":["latency","http_error"]
+    "supportedFaultCapabilities":["latency","http_error","process_kill","service_pause"]
   }'
 ```
 

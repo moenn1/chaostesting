@@ -5,11 +5,15 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 @Service
 public class SafetyGuardrailsService {
+
+    private static final Set<String> SUPPORTED_FAULT_TYPES =
+            Set.of("latency", "http_error", "request_drop", "process_kill", "service_pause");
 
     private final Clock clock;
     private final SafetyGuardrailsProperties properties;
@@ -77,6 +81,7 @@ public class SafetyGuardrailsService {
 
     DispatchValidationResult evaluate(RunDispatchRequest request) {
         String normalizedEnvironment = properties.normalizeEnvironment(request.targetEnvironment());
+        String normalizedFaultType = request.normalizedFaultType();
         List<GuardrailViolation> violations = new ArrayList<>();
 
         if (killSwitchService.isEnabled()) {
@@ -102,11 +107,21 @@ public class SafetyGuardrailsService {
             ));
         }
 
-        switch (request.normalizedFaultType()) {
-            case "latency" -> evaluateLatencyConfiguration(request, violations);
-            case "http_error" -> validateHttpErrorConfig(request, violations);
-            case "request_drop" -> evaluateRequestDropConfiguration(request, violations);
-            default -> {
+        if (!SUPPORTED_FAULT_TYPES.contains(normalizedFaultType)) {
+            violations.add(new GuardrailViolation(
+                    GuardrailViolationCode.UNSUPPORTED_FAULT_TYPE,
+                    "Fault type '%s' is not supported for manual dispatch. Supported values: %s."
+                            .formatted(normalizedFaultType, String.join(", ", SUPPORTED_FAULT_TYPES))
+            ));
+        } else {
+            switch (normalizedFaultType) {
+                case "latency" -> evaluateLatencyConfiguration(request, violations);
+                case "http_error" -> validateHttpErrorConfig(request, violations);
+                case "request_drop" -> evaluateRequestDropConfiguration(request, violations);
+                case "process_kill", "service_pause" -> {
+                }
+                default -> {
+                }
             }
         }
 

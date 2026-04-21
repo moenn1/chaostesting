@@ -256,4 +256,33 @@ class SafetyGuardrailsServiceTest {
         assertThat(response.dropPercentage()).isEqualTo(15);
         assertThat(response.violations()).isEmpty();
     }
+
+    @Test
+    void allowsProcessKillAndServicePauseDispatchesWithoutLatencySettings() {
+        DispatchValidationResponse processKill = safetyGuardrailsService.validate(
+                new RunDispatchRequest("staging", "checkout-worker", "process_kill", 120, null, null, null, null,
+                        null, null, null, List.of(), null, "operator-a")
+        );
+        DispatchValidationResponse servicePause = safetyGuardrailsService.validate(
+                new RunDispatchRequest("staging", "inventory-daemon", "service_pause", 180, null, null, null, null,
+                        null, null, null, List.of(), null, "operator-a")
+        );
+
+        assertThat(processKill.decision()).isEqualTo(DispatchDecision.ALLOWED);
+        assertThat(processKill.violations()).isEmpty();
+        assertThat(servicePause.decision()).isEqualTo(DispatchDecision.ALLOWED);
+        assertThat(servicePause.violations()).isEmpty();
+    }
+
+    @Test
+    void rejectsUnsupportedManualDispatchFaultTypes() {
+        DispatchValidationResponse response = safetyGuardrailsService.validate(
+                new RunDispatchRequest("staging", "inventory-daemon", "consumer_pause", 180, null, null, null, null,
+                        null, null, null, List.of(), null, "operator-a")
+        );
+
+        assertThat(response.decision()).isEqualTo(DispatchDecision.REJECTED);
+        assertThat(response.violations()).extracting(GuardrailViolation::code)
+                .containsExactly(GuardrailViolationCode.UNSUPPORTED_FAULT_TYPE);
+    }
 }

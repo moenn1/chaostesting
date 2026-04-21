@@ -57,7 +57,7 @@ The repo does not yet contain a separate execution-plane service or a message-bu
 1. An operator validates or authorizes a run through [`RunDispatchController`](../src/main/java/com/myg/controlplane/safety/RunDispatchController.java).
 2. [`SafetyGuardrailsService`](../src/main/java/com/myg/controlplane/safety/SafetyGuardrailsService.java) evaluates environment policy, duration limits, kill-switch state, and approval requirements.
 3. [`ChaosRunDispatchService`](../src/main/java/com/myg/controlplane/safety/ChaosRunDispatchService.java) hands the authorized request to [`ChaosRunService`](../src/main/java/com/myg/controlplane/safety/ChaosRunService.java).
-4. [`ChaosRunService`](../src/main/java/com/myg/controlplane/safety/ChaosRunService.java) persists the run, writes the first telemetry snapshot, and schedules telemetry and rollback events locally.
+4. [`ChaosRunService`](../src/main/java/com/myg/controlplane/safety/ChaosRunService.java) persists the run, writes the first telemetry snapshot, and schedules rollback locally. Periodic telemetry remains latency-specific, while `process_kill` and `service_pause` runs record action-oriented lifecycle messages for activation and verified cleanup.
 
 Agents are currently modeled as registered HTTP workers. [`AgentRegistryService`](../src/main/java/com/myg/controlplane/agents/service/AgentRegistryService.java) tracks their last heartbeat and supported fault capabilities. The local bootstrap seeds three sample agents through [`infra/postgres/init/02_sample_agents.sql`](../infra/postgres/init/02_sample_agents.sql), which makes `/agents` useful immediately after setup.
 
@@ -112,7 +112,7 @@ The current observability story on `main` is centered on health, auditability, a
 ### Run validation and dispatch
 
 1. `POST /safety/dispatches/validate` or `POST /safety/dispatches` reaches [`RunDispatchController`](../src/main/java/com/myg/controlplane/safety/RunDispatchController.java).
-2. [`SafetyGuardrailsService`](../src/main/java/com/myg/controlplane/safety/SafetyGuardrailsService.java) enforces environment policy, duration caps, kill-switch state, and approval requirements.
+2. [`SafetyGuardrailsService`](../src/main/java/com/myg/controlplane/safety/SafetyGuardrailsService.java) enforces environment policy, duration caps, kill-switch state, approval requirements, and the current manual dispatch fault set: `latency`, `http_error`, `process_kill`, and `service_pause`.
 3. Authorized runs are persisted by [`ChaosRunService`](../src/main/java/com/myg/controlplane/safety/ChaosRunService.java), which immediately writes an injection snapshot and schedules rollback.
 
 ### Run analysis and rollback

@@ -30,6 +30,7 @@ public record ChaosRunResponse(
         Instant stopCommandIssuedAt,
         String stopCommandIssuedBy,
         String stopCommandReason,
+        String statusMessage,
         long assignmentCount,
         long activeAssignmentCount,
         long stoppedAssignmentCount
@@ -69,6 +70,7 @@ public record ChaosRunResponse(
                 run.stopCommandIssuedAt(),
                 run.stopCommandIssuedBy(),
                 run.stopCommandReason(),
+                RunStatusMessages.currentStatusMessage(run),
                 assignmentSummary.assignmentCount(),
                 assignmentSummary.activeAssignmentCount(),
                 assignmentSummary.stoppedAssignmentCount()

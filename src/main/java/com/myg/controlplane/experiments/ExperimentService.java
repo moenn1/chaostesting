@@ -32,6 +32,8 @@ public class ExperimentService {
     private static final Set<String> REQUEST_DROP_PARAMETERS = Set.of("percentage");
     private static final Set<String> CONSUMER_PAUSE_PARAMETERS = Set.of("pauseSeconds");
     private static final Set<String> CONNECTION_CHURN_PARAMETERS = Set.of("connectionsPerSecond");
+    private static final Set<String> PROCESS_KILL_PARAMETERS = Set.of();
+    private static final Set<String> SERVICE_PAUSE_PARAMETERS = Set.of();
 
     private final StructuredExperimentJpaRepository experimentJpaRepository;
     private final ObjectMapper objectMapper;
@@ -222,9 +224,11 @@ public class ExperimentService {
                 rejectUnknownParameters(type, parameters, CONNECTION_CHURN_PARAMETERS, errors);
                 requireWholeNumberRange(parameters, "connectionsPerSecond", type, 1, 10000, errors);
             }
+            case "process_kill" -> requireNoParameters(type, parameters, PROCESS_KILL_PARAMETERS, errors);
+            case "service_pause" -> requireNoParameters(type, parameters, SERVICE_PAUSE_PARAMETERS, errors);
             default -> errors.add(new ExperimentFieldError(
                     "faultConfig.type",
-                    "Unsupported fault type '%s'. Supported values: latency, cpu, packet_loss, http_error, request_drop, consumer_pause, connection_churn."
+                    "Unsupported fault type '%s'. Supported values: latency, cpu, packet_loss, http_error, request_drop, consumer_pause, connection_churn, process_kill, service_pause."
                             .formatted(type)
             ));
         }
@@ -390,6 +394,20 @@ public class ExperimentService {
                         "Unsupported parameter '%s' for fault type '%s'. Allowed keys: %s."
                                 .formatted(parameter, faultType, String.join(", ", allowed))
                 )));
+    }
+
+    private void requireNoParameters(String faultType,
+                                     Map<String, BigDecimal> parameters,
+                                     Set<String> ignoredAllowed,
+                                     List<ExperimentFieldError> errors) {
+        if (parameters.isEmpty()) {
+            return;
+        }
+        errors.add(new ExperimentFieldError(
+                "faultConfig.parameters",
+                "Fault type '%s' does not accept numeric parameters; use targetSelector and durationSeconds instead."
+                        .formatted(faultType)
+        ));
     }
 
     private void requireDecimalRange(Map<String, BigDecimal> parameters,

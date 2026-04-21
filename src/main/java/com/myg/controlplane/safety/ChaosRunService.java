@@ -69,11 +69,11 @@ public class ChaosRunService {
     public void startAuthorizedRun(DispatchAuthorizationResponse authorization, RunDispatchRequest request) {
         ChaosRun run = persistRun(authorization, null, null);
         List<RunAssignmentEntity> assignments = createAssignments(run, run.startedAt());
-        if (supportsRunTelemetry(run)) {
+        if (supportsTelemetrySnapshots(run)) {
             latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.injection(
                     run,
                     authorization.authorizedAt(),
-                    activationMessage(run)
+                    RunStatusMessages.activationMessage(run)
             ));
         }
         auditLogService.record(
@@ -95,11 +95,11 @@ public class ChaosRunService {
                                     RunTargetSnapshot targetSnapshot) {
         ChaosRun run = persistRun(authorization, experiment.id(), targetSnapshot);
         List<RunAssignmentEntity> assignments = createAssignments(run, run.startedAt());
-        if (supportsRunTelemetry(run)) {
+        if (supportsTelemetrySnapshots(run)) {
             latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.injection(
                     run,
                     run.startedAt(),
-                    activationMessage(run)
+                    RunStatusMessages.activationMessage(run)
             ));
         }
         auditLogService.record(
@@ -189,11 +189,11 @@ public class ChaosRunService {
             chaosRunJpaRepository.save(entity);
 
             ChaosRun rolledBackRun = entity.toDomain(objectMapper);
-            if (supportsRunTelemetry(rolledBackRun)) {
+            if (supportsTelemetrySnapshots(rolledBackRun)) {
                 latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.rollback(
                         rolledBackRun,
                         now,
-                        rollbackTelemetryMessage(rolledBackRun)
+                        RunStatusMessages.rollbackMessage(rolledBackRun, message)
                 ));
             }
             auditLogService.record(
@@ -254,11 +254,11 @@ public class ChaosRunService {
                 cancelRuntime(runId);
                 return;
             }
-            if (supportsRunTelemetry(run)) {
+            if (supportsPeriodicTelemetry(run)) {
                 latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.injection(
                         run,
                         clock.instant(),
-                        activeTelemetryMessage(run)
+                        RunStatusMessages.activeTelemetryMessage(run)
                 ));
             }
         });
@@ -283,7 +283,7 @@ public class ChaosRunService {
 
         Instant firstTelemetryAt = scheduledFrom.plus(latencyInjectionProperties.getTelemetryInterval());
         ScheduledFuture<?> telemetryFuture = null;
-        if (supportsRunTelemetry(run) && firstTelemetryAt.isBefore(run.rollbackScheduledAt())) {
+        if (supportsPeriodicTelemetry(run) && firstTelemetryAt.isBefore(run.rollbackScheduledAt())) {
             telemetryFuture = taskScheduler.scheduleAtFixedRate(
                     () -> emitScheduledTelemetry(run.id()),
                     firstTelemetryAt,
@@ -337,11 +337,11 @@ public class ChaosRunService {
                 "Rollback verified after " + reason + ".",
                 rollbackVerifiedAt
         );
-        if (supportsRunTelemetry(rolledBackRun)) {
+        if (supportsTelemetrySnapshots(rolledBackRun)) {
             latencyTelemetrySnapshotJpaRepository.save(LatencyTelemetrySnapshotEntity.rollback(
                     rolledBackRun,
                     rollbackVerifiedAt,
-                    rollbackTelemetryMessage(rolledBackRun)
+                    RunStatusMessages.rollbackMessage(rolledBackRun, reason)
             ));
         }
         auditLogService.record(
@@ -617,45 +617,14 @@ public class ChaosRunService {
         ));
     }
 
-    private String activationMessage(ChaosRun run) {
-        return faultSummary(run) + " activated.";
+    private boolean supportsTelemetrySnapshots(ChaosRun run) {
+        return "latency".equalsIgnoreCase(run.faultType())
+                || "request_drop".equalsIgnoreCase(run.faultType())
+                || "process_kill".equalsIgnoreCase(run.faultType())
+                || "service_pause".equalsIgnoreCase(run.faultType());
     }
 
-    private String activeTelemetryMessage(ChaosRun run) {
-        return faultSummary(run) + " remains active.";
-    }
-
-    private String rollbackTelemetryMessage(ChaosRun run) {
-        return "Rollback verified after stopping " + faultSummary(run).toLowerCase() + ".";
-    }
-
-    private String faultSummary(ChaosRun run) {
-        return switch (run.faultType()) {
-            case "request_drop" -> "Request-drop injection at %s%%".formatted(run.dropPercentage());
-            case "latency" -> latencySummary(run);
-            default -> "Fault '" + run.faultType() + "'";
-        };
-    }
-
-    private String latencySummary(ChaosRun run) {
-        String trafficSummary = run.trafficPercentage() == null
-                ? "traffic"
-                : run.trafficPercentage() + "% of traffic";
-        if (run.latencyMinimumMilliseconds() != null && run.latencyMaximumMilliseconds() != null) {
-            return "Random latency between %sms and %sms across %s"
-                    .formatted(run.latencyMinimumMilliseconds(), run.latencyMaximumMilliseconds(), trafficSummary);
-        }
-        if (run.latencyJitterMilliseconds() != null && run.latencyMilliseconds() != null) {
-            return "Latency %sms +/- %sms across %s"
-                    .formatted(run.latencyMilliseconds(), run.latencyJitterMilliseconds(), trafficSummary);
-        }
-        if (run.latencyMilliseconds() != null) {
-            return "Latency %sms across %s".formatted(run.latencyMilliseconds(), trafficSummary);
-        }
-        return "Latency fault across %s".formatted(trafficSummary);
-    }
-
-    private boolean supportsRunTelemetry(ChaosRun run) {
+    private boolean supportsPeriodicTelemetry(ChaosRun run) {
         return "latency".equalsIgnoreCase(run.faultType())
                 || "request_drop".equalsIgnoreCase(run.faultType());
     }
