@@ -166,6 +166,14 @@ For random latency envelopes, either use `latencyMilliseconds` with `latencyJitt
 
 The full role-to-route matrix and OIDC mapping notes are documented in `docs/security-auth.md`.
 
+## Run observability APIs
+
+Completed and active runs now expose three analysis surfaces for the results UI and operator workflows:
+
+- `GET /safety/runs/{runId}/metrics` for chart-friendly summary metrics and ordered telemetry points.
+- `GET /safety/runs/{runId}/traces` for run-scoped lifecycle trace summaries derived from audit and telemetry records.
+- `GET /safety/runs/{runId}/diagnostics` for a downloadable JSON bundle that packages the run record, metrics, traces, telemetry, and audit history.
+
 Check local health after the app is running:
 
 ```bash

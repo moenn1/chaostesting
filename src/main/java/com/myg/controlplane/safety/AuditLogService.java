@@ -74,6 +74,16 @@ public class AuditLogService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<SafetyAuditRecordResponse> findRunRecords(UUID runId) {
+        return repository.findAllByResourceTypeAndResourceIdOrderByRecordedAtAscIdAsc(
+                        AuditResourceType.RUN,
+                        runId.toString()
+                ).stream()
+                .map(entity -> SafetyAuditRecordResponse.from(entity.toDomain(objectMapper)))
+                .toList();
+    }
+
     private String normalizeResourceId(AuditResourceType resourceType, String resourceId) {
         if (resourceId != null && !resourceId.isBlank()) {
             return resourceId.trim();

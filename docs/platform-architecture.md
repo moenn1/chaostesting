@@ -92,14 +92,17 @@ That means the platform can document the intended event-bus boundary today, but 
 
 ## Observability and analysis surfaces
 
-The current observability story on `main` is centered on health, auditability, and run telemetry:
+The current observability story on `main` is centered on health, auditability, and run-level diagnostics:
 
 - [`/actuator/health`](../src/main/java/com/myg/controlplane/security/SecurityConfiguration.java) confirms service health.
 - [`/safety/runs/{runId}/telemetry`](../src/main/java/com/myg/controlplane/safety/RunDispatchController.java) returns the timeline of injection and rollback snapshots.
+- [`/safety/runs/{runId}/metrics`](../src/main/java/com/myg/controlplane/safety/RunDispatchController.java) returns chart-friendly run metrics and time-series points derived from persisted telemetry.
+- [`/safety/runs/{runId}/traces`](../src/main/java/com/myg/controlplane/safety/RunDispatchController.java) returns run-scoped lifecycle trace summaries synthesized from audit and telemetry records.
+- [`/safety/runs/{runId}/diagnostics`](../src/main/java/com/myg/controlplane/safety/RunDispatchController.java) exports a downloadable JSON bundle with the run record, metrics, traces, telemetry, and audit history.
 - [`/audit/events`](../src/main/java/com/myg/controlplane/safety/AuditLogController.java) and [`/safety/audit-records`](../src/main/java/com/myg/controlplane/safety/AuditLogController.java) expose the audit trail.
 - Static UI routes under [`src/main/resources/static`](../src/main/resources/static) provide a demo shell for dashboards, experiments, results, history, and agent views.
 
-[`AuditLogService`](../src/main/java/com/myg/controlplane/safety/AuditLogService.java) writes immutable action records for approvals, run starts, run stops, rollbacks, agent registration, and kill-switch changes. [`ChaosRunService`](../src/main/java/com/myg/controlplane/safety/ChaosRunService.java) writes telemetry snapshots at injection start, during scheduled runtime, and at rollback.
+[`AuditLogService`](../src/main/java/com/myg/controlplane/safety/AuditLogService.java) writes immutable action records for approvals, run starts, run stops, rollbacks, agent registration, and kill-switch changes. [`ChaosRunService`](../src/main/java/com/myg/controlplane/safety/ChaosRunService.java) writes telemetry snapshots at injection start, during scheduled runtime, and at rollback. [`RunObservabilityService`](../src/main/java/com/myg/controlplane/safety/RunObservabilityService.java) joins those persisted records into operator-facing metrics, trace references, and downloadable diagnostics.
 
 ## Core lifecycle sequences
 
@@ -117,7 +120,7 @@ The current observability story on `main` is centered on health, auditability, a
 
 ### Run analysis and rollback
 
-1. `GET /safety/runs/{runId}` and `GET /safety/runs/{runId}/telemetry` expose the current run state and snapshot history.
+1. `GET /safety/runs/{runId}`, `GET /safety/runs/{runId}/telemetry`, `GET /safety/runs/{runId}/metrics`, and `GET /safety/runs/{runId}/traces` expose the current run state and analysis surfaces.
 2. `POST /safety/runs/{runId}/stop` or the scheduled timeout marks the run for rollback.
 3. [`ChaosRunService`](../src/main/java/com/myg/controlplane/safety/ChaosRunService.java) writes rollback telemetry and corresponding audit records.
-4. `GET /safety/audit-records?resourceId=<run-id>` provides the operator-facing audit trail for the run.
+4. `GET /safety/audit-records?resourceId=<run-id>` provides the operator-facing audit trail for the run, and `GET /safety/runs/{runId}/diagnostics` packages the full run bundle for postmortem export.

@@ -6,5 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface LatencyTelemetrySnapshotJpaRepository extends JpaRepository<LatencyTelemetrySnapshotEntity, UUID> {
 
+    List<LatencyTelemetrySnapshotEntity> findAllByRunIdOrderByCapturedAtAscIdAsc(UUID runId);
+
     List<LatencyTelemetrySnapshotEntity> findAllByRunIdOrderByCapturedAtDescIdDesc(UUID runId);
 }

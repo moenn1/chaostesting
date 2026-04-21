@@ -6,5 +6,10 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface SafetyAuditRecordJpaRepository extends JpaRepository<SafetyAuditRecordEntity, UUID> {
 
+    List<SafetyAuditRecordEntity> findAllByResourceTypeAndResourceIdOrderByRecordedAtAscIdAsc(
+            AuditResourceType resourceType,
+            String resourceId
+    );
+
     List<SafetyAuditRecordEntity> findAllByOrderByRecordedAtDescIdDesc();
 }

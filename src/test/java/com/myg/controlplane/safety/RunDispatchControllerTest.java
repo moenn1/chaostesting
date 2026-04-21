@@ -1,8 +1,10 @@
 package com.myg.controlplane.safety;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -269,6 +271,14 @@ class RunDispatchControllerTest {
                 .andExpect(jsonPath("$[0].metadata.dropPercentage").value(12))
                 .andExpect(jsonPath("$[2].action").value("RUN_STARTED"))
                 .andExpect(jsonPath("$[2].metadata.faultType").value("request_drop"));
+
+        mockMvc.perform(as(get("/safety/runs/{runId}/metrics", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.faultType").value("request_drop"))
+                .andExpect(jsonPath("$.dropPercentage").value(12))
+                .andExpect(jsonPath("$.summary.telemetryPointCount").value(2))
+                .andExpect(jsonPath("$.series[0].faultType").value("request_drop"))
+                .andExpect(jsonPath("$.series[0].dropPercentage").value(12));
     }
 
     @Test
@@ -315,6 +325,60 @@ class RunDispatchControllerTest {
                 .andExpect(jsonPath("$[1].actor").value("ops-oncall"))
                 .andExpect(jsonPath("$[2].action").value("RUN_STARTED"))
                 .andExpect(jsonPath("$[2].actor").value("experiment-operator"));
+    }
+
+    @Test
+    void exposesRunMetricsTracesAndDiagnostics() throws Exception {
+        String runId = dispatchLatencyRun();
+        clock.advanceSeconds(1);
+
+        mockMvc.perform(as(post("/safety/runs/{runId}/stop", runId), "ops-oncall", "OPERATOR")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "customer-impact containment"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(as(get("/safety/runs/{runId}/metrics", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runId").value(runId))
+                .andExpect(jsonPath("$.status").value("ROLLED_BACK"))
+                .andExpect(jsonPath("$.summary.requestedDurationSeconds").value(120))
+                .andExpect(jsonPath("$.summary.observedDurationSeconds").value(1))
+                .andExpect(jsonPath("$.summary.telemetryPointCount").value(2))
+                .andExpect(jsonPath("$.summary.injectionPointCount").value(1))
+                .andExpect(jsonPath("$.summary.rollbackPointCount").value(1))
+                .andExpect(jsonPath("$.summary.maxLatencyMilliseconds").value(350))
+                .andExpect(jsonPath("$.summary.averageLatencyMilliseconds").value(350))
+                .andExpect(jsonPath("$.summary.maxTrafficPercentage").value(30))
+                .andExpect(jsonPath("$.series", hasSize(2)))
+                .andExpect(jsonPath("$.series[0].phase").value("INJECTION"))
+                .andExpect(jsonPath("$.series[1].phase").value("ROLLBACK"));
+
+        mockMvc.perform(as(get("/safety/runs/{runId}/traces", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runId").value(runId))
+                .andExpect(jsonPath("$.traces", hasSize(2)))
+                .andExpect(jsonPath("$.traces[0].source").value("audit"))
+                .andExpect(jsonPath("$.traces[0].entryCount").value(3))
+                .andExpect(jsonPath("$.traces[0].endpoint").value("/safety/audit-records?resourceType=run&resourceId=" + runId))
+                .andExpect(jsonPath("$.traces[0].summary.actions[0]").value("RUN_STARTED"))
+                .andExpect(jsonPath("$.traces[1].source").value("telemetry"))
+                .andExpect(jsonPath("$.traces[1].entryCount").value(2))
+                .andExpect(jsonPath("$.traces[1].summary.phases[0]").value("INJECTION"))
+                .andExpect(jsonPath("$.traces[1].summary.phases[1]").value("ROLLBACK"));
+
+        mockMvc.perform(as(get("/safety/runs/{runId}/diagnostics", runId), "viewer", "VIEWER"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition", containsString("run-" + runId + "-diagnostics.json")))
+                .andExpect(jsonPath("$.runId").value(runId))
+                .andExpect(jsonPath("$.run.status").value("ROLLED_BACK"))
+                .andExpect(jsonPath("$.metrics.summary.telemetryPointCount").value(2))
+                .andExpect(jsonPath("$.traces.traces", hasSize(2)))
+                .andExpect(jsonPath("$.telemetry", hasSize(2)))
+                .andExpect(jsonPath("$.auditRecords", hasSize(3)));
     }
 
     @Test

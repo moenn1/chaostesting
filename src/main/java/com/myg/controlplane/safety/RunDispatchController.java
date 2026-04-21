@@ -6,7 +6,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -26,6 +30,7 @@ public class RunDispatchController {
 
     private final ChaosRunDispatchService chaosRunDispatchService;
     private final ChaosRunService chaosRunService;
+    private final RunObservabilityService runObservabilityService;
     private final DispatchApprovalService dispatchApprovalService;
     private final KillSwitchService killSwitchService;
     private final SafetyGuardrailsService safetyGuardrailsService;
@@ -33,12 +38,14 @@ public class RunDispatchController {
 
     public RunDispatchController(ChaosRunDispatchService chaosRunDispatchService,
                                  ChaosRunService chaosRunService,
+                                 RunObservabilityService runObservabilityService,
                                  DispatchApprovalService dispatchApprovalService,
                                  KillSwitchService killSwitchService,
                                  SafetyGuardrailsService safetyGuardrailsService,
                                  CurrentSecurityActor currentSecurityActor) {
         this.chaosRunDispatchService = chaosRunDispatchService;
         this.chaosRunService = chaosRunService;
+        this.runObservabilityService = runObservabilityService;
         this.dispatchApprovalService = dispatchApprovalService;
         this.killSwitchService = killSwitchService;
         this.safetyGuardrailsService = safetyGuardrailsService;
@@ -99,6 +106,31 @@ public class RunDispatchController {
                                                 @Valid @RequestBody RunExecutionReportRequest request,
                                                 Authentication authentication) {
         return chaosRunService.reportRun(runId, currentSecurityActor.username(authentication), request);
+    }
+
+    @GetMapping("/runs/{runId}/metrics")
+    @PreAuthorize("hasAuthority('chaos.view')")
+    public RunMetricsResponse getMetrics(@PathVariable UUID runId) {
+        return runObservabilityService.getMetrics(runId);
+    }
+
+    @GetMapping("/runs/{runId}/traces")
+    @PreAuthorize("hasAuthority('chaos.view')")
+    public RunTraceResponse getTraces(@PathVariable UUID runId) {
+        return runObservabilityService.getTraces(runId);
+    }
+
+    @GetMapping("/runs/{runId}/diagnostics")
+    @PreAuthorize("hasAuthority('chaos.view')")
+    public ResponseEntity<RunDiagnosticsResponse> downloadDiagnostics(@PathVariable UUID runId) {
+        String filename = "run-" + runId + "-diagnostics.json";
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(
+                        HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename(filename).build().toString()
+                )
+                .body(runObservabilityService.getDiagnostics(runId));
     }
 
     @PostMapping("/runs/{runId}/stop")

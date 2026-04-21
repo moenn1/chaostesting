@@ -159,6 +159,27 @@ curl -s \
   "http://localhost:8080/safety/audit-records?resourceId=<dispatch-id>"
 ```
 
+```bash
+curl -s \
+  -H 'X-Chaos-Dev-User: viewer-demo' \
+  -H 'X-Chaos-Dev-Roles: VIEWER' \
+  http://localhost:8080/safety/runs/<dispatch-id>/metrics
+```
+
+```bash
+curl -s \
+  -H 'X-Chaos-Dev-User: viewer-demo' \
+  -H 'X-Chaos-Dev-Roles: VIEWER' \
+  http://localhost:8080/safety/runs/<dispatch-id>/traces
+```
+
+```bash
+curl -sOJ \
+  -H 'X-Chaos-Dev-User: viewer-demo' \
+  -H 'X-Chaos-Dev-Roles: VIEWER' \
+  http://localhost:8080/safety/runs/<dispatch-id>/diagnostics
+```
+
 After the stop completes, expect:
 
 - run `status`: `ROLLED_BACK`
@@ -166,6 +187,10 @@ After the stop completes, expect:
 - `stopCommandReason`: `customer-impact containment`
 - latest telemetry `phase`: `ROLLBACK`
 - latest telemetry `rollbackVerified`: `true`
+- metrics `summary.telemetryPointCount`: `2`
+- metrics `summary.maxLatencyMilliseconds`: `350`
+- trace sources: `audit`, `telemetry`
+- diagnostics download filename: `run-<dispatch-id>-diagnostics.json`
 - audit actions in descending order: `RUN_ROLLBACK_VERIFIED`, `RUN_STOP_REQUESTED`, `RUN_STARTED`
 
 ## Walkthrough 2: approval-gated production latency drill
